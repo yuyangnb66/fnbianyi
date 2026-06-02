@@ -1,0 +1,4 @@
+_ref/
+__pycache__/
+*.py[cod]
+examples/*.py
