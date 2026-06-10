@@ -69,13 +69,14 @@ class Compiler:
         source: str,
         optimize: bool = True,
         run: bool = False,
+        trace: bool = False,
     ) -> CompileResult:
         result = CompileResult(source=source)
         has_error_token = False
 
         # 1. 词法分析
         try:
-            lex_result = Lexer(source, self.tokens_path).tokenize()
+            lex_result = Lexer(source, self.tokens_path, trace=trace).tokenize()
             result.tokens = lex_result.tokens
             result.errors.extend(lex_result.errors)
             has_error_token = any(t.kind == "ERROR" for t in result.tokens)
@@ -211,9 +212,9 @@ class Compiler:
 
         return self._finalize(result)
 
-    def compile_file(self, path: Path, optimize: bool = True, run: bool = False) -> CompileResult:
+    def compile_file(self, path: Path, optimize: bool = True, run: bool = False, trace: bool = False) -> CompileResult:
         source = path.read_text(encoding="utf-8")
-        return self.compile(source, optimize=optimize, run=run)
+        return self.compile(source, optimize=optimize, run=run, trace=trace)
 
     @staticmethod
     def _run_target(code: str, interactive: bool = True) -> str:

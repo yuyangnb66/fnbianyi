@@ -30,7 +30,10 @@ python -m compiler.main workspace/main.ml --no-opt --run
 # 指定输出路径
 python -m compiler.main workspace/main.ml -o out/app.py
 
-# 运行唯一测试：解析器错误恢复（需 3 秒内完成 32 个恶意输入）
+# 打印词法器 NFA/DFA 逐 token 匹配过程
+python -m compiler.main workspace/main.ml --trace
+
+# 运行唯一测试：解析器错误恢复（需 3 秒内完成 35 个恶意输入）
 python tests/test_parser_recovery.py
 ```
 
@@ -41,6 +44,7 @@ python tests/test_parser_recovery.py
 - **不要运行 lint / typecheck / formatter** — 项目无任何相关配置
 - **不要修改 `workspace/*.py`** — 编译产物，已被 `.gitignore` 忽略
 - **不要破坏解析器的恐慌恢复机制** — 解析器保证不会在恶意输入上挂死，测试用 3 秒超时验证。若修改 `parser.py`，必须重新运行 `python tests/test_parser_recovery.py`
+- **不要在 `tokens.json` 中用 PCRE 正则**（如 `\d`、`[a-z]`）— 词法器使用自实现 NFA/DFA 引擎，仅支持字符集语法（`digit`、`letter`、`|`、`*`、`+`、`?`、`()`、`\x` 转义）。字面点号需写 `\.`
 
 ## 架构要点
 
@@ -54,6 +58,10 @@ python tests/test_parser_recovery.py
 
 各阶段顺序不可改变：前阶段出错会中断流水线（如语义错误不会继续生成目标代码）。
 
+### 词法器（NFA/DFA 引擎）
+
+词法器使用自实现的 NFA/DFA 正则引擎（`compiler/lexer.py` 中的 `RegexParser`、`NFA`、`DFA` 类），**非 Python `re` 模块**。流程：`tokens.json` 中的字符集正则 → Shunting-yard 中缀转后缀 → Thompson 构造 NFA → 子集构造 DFA → 最长匹配取 token。详细原理见 `assets/词法器对比分析.md`。
+
 ### 目录职责
 
 | 目录 | 用途 | 注意 |
@@ -63,7 +71,8 @@ python tests/test_parser_recovery.py
 | `editor/gui.py` | Tkinter 桌面 IDE | 无头环境下 Tkinter 可能不可用 |
 | `workspace/` | 用户源码 (`*.ml`) 与 `write()` 输出 (`output/`) | 默认 IDE 打开 `workspace/main.ml` |
 | `tests/` | 包含 `test_parser_recovery.py` | |
-| `assets/` | 设计笔记 | 已被 gitignore |
+| `assets/` | 设计笔记与词法器分析 | 已被 gitignore |
+| `改动词法分析版本/` | 旧版 DFA 词法器参考副本 | 来自 merge，仅作参考 |
 
 ### 代码生成双路径
 

@@ -29,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", action="store_true", help="编译并运行")
     parser.add_argument("--gui", action="store_true", help="启动桌面代码编辑器")
     parser.add_argument("--no-opt", action="store_true", help="跳过优化阶段")
+    parser.add_argument("--trace", action="store_true", help="打印词法器 NFA/DFA 调试信息")
     parser.add_argument(
         "--dump",
         choices=["tokens", "ast", "tac", "opt", "all"],
@@ -47,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     compiler = Compiler()
-    result = compiler.compile_file(src_path, optimize=not args.no_opt, run=args.run)
+    result = compiler.compile_file(src_path, optimize=not args.no_opt, run=args.run, trace=args.trace)
 
     if not result.success:
         print("编译失败:", file=sys.stderr)
