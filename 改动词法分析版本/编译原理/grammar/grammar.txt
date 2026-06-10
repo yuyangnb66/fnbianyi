@@ -1,0 +1,24 @@
+MiniLang 语法规则 (BNF)
+======================
+
+参考 CompilationPrinciple 项目的文法描述方式，本文件为可读版语法库。
+机器可读版本见 grammar.json。
+
+Program   → StmtList
+StmtList  → Stmt StmtList | ε
+Stmt      → DeclStmt | AssignStmt | IfStmt | WhileStmt | PrintStmt | Block
+
+DeclStmt  → Type IDENT ';'
+AssignStmt→ IDENT '=' Expr ';'
+IfStmt    → 'if' '(' RelExpr ')' Block ['else' Block]
+WhileStmt → 'while' '(' RelExpr ')' Block
+PrintStmt → 'print' '(' RelExpr ')' ';'
+Block     → '{' StmtList '}'
+
+Type      → 'int' | 'float'
+RelExpr   → Expr [('=='|'!='|'<'|'<='|'>'|'>=') Expr]
+Expr      → Term [('+'|'-') Term]*
+Term      → Factor [('*'|'/') Factor]*
+Factor    → INT_LIT | FLOAT_LIT | IDENT | '(' RelExpr ')' | '-' Factor
+
+词法规则见 tokens.json。
