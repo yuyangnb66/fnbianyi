@@ -205,11 +205,11 @@ class StaticValidator:
                             code="E107",
                         )
                     )
-                if cur.kind == "ELSE" and nxt.kind != "LBRACE":
+                if cur.kind == "ELSE" and nxt.kind not in ("LBRACE", "IF"):
                     diags.append(
                         diagnostic(
                             Stage.SYNTAX,
-                            "'else' 后应跟代码块 '{ ... }'",
+                            "'else' 后应跟代码块 '{ ... }' 或 'if'",
                             line=nxt.line,
                             col=nxt.col,
                             code="E108",

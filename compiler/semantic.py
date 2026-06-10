@@ -249,6 +249,9 @@ class SemanticAnalyzer:
             if not stmt.then_block.statements:
                 self._warn("if 分支代码块为空", stmt.line, "W302")
             self._analyze_block(stmt.then_block)
+            for elif_cond, elif_block in stmt.elif_blocks:
+                self._check_condition(elif_cond, stmt.line)
+                self._analyze_block(elif_block)
             if stmt.else_block:
                 self._analyze_block(stmt.else_block)
         elif isinstance(stmt, WhileStmt):

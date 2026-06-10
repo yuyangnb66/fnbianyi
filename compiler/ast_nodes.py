@@ -45,6 +45,7 @@ class AssignStmt(Stmt):
 class IfStmt(Stmt):
     condition: "Expr"
     then_block: "Block"
+    elif_blocks: tuple = ()
     else_block: Optional["Block"] = None
     line: int = 0
 

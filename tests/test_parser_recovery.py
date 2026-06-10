@@ -49,6 +49,10 @@ BAD_SOURCES = [
     "",
     "@#$%^& invalid chars only",
     "int x; int y; if (x == ) { print(x); } while ( { } for (;; {",
+    "if (1) {} else if (2 { }",
+    "if (1) {} else if { }",
+    "else if (1) {}",
+    "if (1) {} else if (2) {} else {} else if (3) {}",
 ]
 
 
