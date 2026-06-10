@@ -10,7 +10,7 @@
 
 | 阶段 | 模块 | 说明 |
 |------|------|------|
-| 词法分析 | `compiler/lexer.py` | 从 `grammar/tokens.json` 加载 Token 规则 |
+| 词法分析 | `compiler/lexer.py` | 自实现 NFA/DFA 正则引擎，从 `grammar/tokens.json` 加载字符集规则 |
 | 语法分析 | `compiler/parser.py` | 递归下降，依据 `grammar/grammar.json` 的 BNF |
 | 语义分析 | `compiler/semantic.py` | 符号表、作用域、类型检查 |
 | 中间代码 | `compiler/tac.py` | 三地址码 (Three-Address Code) |
@@ -40,11 +40,17 @@ python -m compiler.main workspace/main.ml --run
 
 # 查看中间结果
 python -m compiler.main workspace/main.ml --dump all
+
+# 词法器调试 trace
+python -m compiler.main workspace/main.ml --trace
+
+# 跳过优化
+python -m compiler.main workspace/main.ml --no-opt --run
 ```
 
 ## 语言特性
 
-`int` / `float` / `string`、函数（含递归）、`if` / `while` / `for`、`break` / `continue`、数组、`string[i]`、`len()`、`input`、`print`（支持多参数同一行输出）、`printn`（不换行）、`write`。
+`int` / `float` / `string`、函数（含递归）、`if` / `else if` / `else`、`while` / `for`、`break` / `continue`、数组、`string[i]`、`len()`、`input`、`print`（支持多参数同一行输出）、`printn`（不换行）、`write`。
 
 ### 一行读多个数（类似 `scanf`）
 
@@ -59,10 +65,12 @@ t = getint(line, 1);       // 取第 2 个数
 
 ```
 fnbianyi/
-├── compiler/          # 编译器各阶段
-├── grammar/           # 词法/语法规则
-├── editor/gui.py      # 桌面 IDE（默认入口）
-└── workspace/         # 用户源码与 write 输出
+├── compiler/              # 编译器各阶段
+├── grammar/               # 词法/语法规则
+├── editor/gui.py          # 桌面 IDE（默认入口）
+├── tests/                 # 测试
+├── assets/                # 设计笔记与分析文档
+└── workspace/             # 用户源码与 write 输出
     ├── main.ml
     └── output/
 ```
@@ -71,6 +79,6 @@ fnbianyi/
 
 | 参考项目 | 本项目 |
 |----------|--------|
-| Java DFA 词法分析 | Python 正则词法分析 + `tokens.json` |
+| Java DFA 词法分析 | 自实现 NFA/DFA 词法分析 + `tokens.json` |
 | Python LL1/LR 分析器 | 递归下降 + `grammar.json` |
 | （无） | 语义分析、TAC、优化、代码生成 |

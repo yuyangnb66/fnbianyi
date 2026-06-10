@@ -161,20 +161,39 @@ class TACGenerator:
             self._out = old_out if old_out is not None else self.program.instructions
 
     def _gen_if(self, stmt: IfStmt, out: List[TACInstr]) -> None:
-        cond = self._gen_condition(stmt.condition, out)
-        else_label = self._new_label("else")
         end_label = self._new_label("endif")
-        if stmt.else_block:
-            out.append(TACInstr("ifFalse", cond, "", else_label))
-            self._gen_stmt(stmt.then_block, out)
-            out.append(TACInstr("goto", "", "", end_label))
-            out.append(TACInstr("label", "", "", else_label))
-            self._gen_stmt(stmt.else_block, out)
-            out.append(TACInstr("label", "", "", end_label))
-        else:
+        elif_count = len(stmt.elif_blocks)
+        has_else = bool(stmt.else_block)
+        total_targets = elif_count + (1 if has_else else 0)
+
+        if total_targets == 0:
+            cond = self._gen_condition(stmt.condition, out)
             out.append(TACInstr("ifFalse", cond, "", end_label))
             self._gen_stmt(stmt.then_block, out)
-            out.append(TACInstr("label", "", "", end_label))
+        else:
+            next_labels = [self._new_label("elif") for _ in range(total_targets)]
+
+            cond = self._gen_condition(stmt.condition, out)
+            out.append(TACInstr("ifFalse", cond, "", next_labels[0]))
+            self._gen_stmt(stmt.then_block, out)
+            out.append(TACInstr("goto", "", "", end_label))
+
+            for i, (elif_cond, elif_block) in enumerate(stmt.elif_blocks):
+                out.append(TACInstr("label", "", "", next_labels[i]))
+                cond = self._gen_condition(elif_cond, out)
+                next_idx = i + 1
+                if next_idx < len(next_labels):
+                    out.append(TACInstr("ifFalse", cond, "", next_labels[next_idx]))
+                else:
+                    out.append(TACInstr("ifFalse", cond, "", end_label))
+                self._gen_stmt(elif_block, out)
+                out.append(TACInstr("goto", "", "", end_label))
+
+            if stmt.else_block:
+                out.append(TACInstr("label", "", "", next_labels[-1]))
+                self._gen_stmt(stmt.else_block, out)
+
+        out.append(TACInstr("label", "", "", end_label))
 
     def _gen_while(self, stmt: WhileStmt, out: List[TACInstr]) -> None:
         start = self._new_label("while")

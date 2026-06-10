@@ -16,7 +16,9 @@
     "AssignStmt": [["IDENT", "ASSIGN", "Expr", "SEMI"]],
     "IfStmt": [
       ["IF", "LPAREN", "Expr", "RPAREN", "Block"],
-      ["IF", "LPAREN", "Expr", "RPAREN", "Block", "ELSE", "Block"]
+      ["IF", "LPAREN", "Expr", "RPAREN", "Block", "ELSE", "Block"],
+      ["IF", "LPAREN", "Expr", "RPAREN", "Block", "ELSE", "IF", "LPAREN", "Expr", "RPAREN", "Block"],
+      ["IF", "LPAREN", "Expr", "RPAREN", "Block", "ELSE", "IF", "LPAREN", "Expr", "RPAREN", "Block", "ELSE", "Block"]
     ],
     "WhileStmt": [["WHILE", "LPAREN", "Expr", "RPAREN", "Block"]],
     "PrintStmt": [["PRINT", "LPAREN", "Expr", "RPAREN", "SEMI"]],

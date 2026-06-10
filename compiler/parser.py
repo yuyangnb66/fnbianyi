@@ -271,10 +271,27 @@ class Parser:
         then_block = self._parse_block()
         if not then_block:
             return None
+        elif_blocks: list = []
         else_block = None
-        if self._match("ELSE"):
-            else_block = self._parse_block()
-        return IfStmt(cond, then_block, else_block, line)
+        while self._match("ELSE"):
+            if self._peek().kind == "IF":
+                elif_line = self._advance().line
+                if not self._expect("LPAREN"):
+                    break
+                elif_cond = self._parse_logic()
+                if not elif_cond:
+                    break
+                if not self._expect("RPAREN"):
+                    if self._peek().kind == "LBRACE":
+                        self._error("else if 条件缺少右括号 ')'，在 '{' 之前", code="E216")
+                    break
+                elif_body = self._parse_block()
+                if elif_body:
+                    elif_blocks.append((elif_cond, elif_body))
+            else:
+                else_block = self._parse_block()
+                break
+        return IfStmt(cond, then_block, tuple(elif_blocks), else_block, line)
 
     def _parse_while(self) -> Optional[WhileStmt]:
         line = self._advance().line

@@ -88,6 +88,8 @@ class CodeGenerator:
                 names |= CodeGenerator._collect_locals(stmt)
             elif isinstance(stmt, IfStmt):
                 names |= CodeGenerator._collect_locals(stmt.then_block)
+                for _, elif_block in stmt.elif_blocks:
+                    names |= CodeGenerator._collect_locals(elif_block)
                 if stmt.else_block:
                     names |= CodeGenerator._collect_locals(stmt.else_block)
             elif isinstance(stmt, WhileStmt):
@@ -158,6 +160,11 @@ class CodeGenerator:
             lines = [f"{pad}if {cond}:"]
             then_b = self._gen_block_ast(stmt.then_block, indent + 1, params, locals_set, loop)
             lines.extend(then_b or [f"{' ' * 4 * (indent + 1)}pass"])
+            for elif_cond, elif_block in stmt.elif_blocks:
+                cond = self._gen_expr_ast(elif_cond, params, locals_set)
+                lines.append(f"{pad}elif {cond}:")
+                elif_b = self._gen_block_ast(elif_block, indent + 1, params, locals_set, loop)
+                lines.extend(elif_b or [f"{' ' * 4 * (indent + 1)}pass"])
             if stmt.else_block:
                 lines.append(f"{pad}else:")
                 else_b = self._gen_block_ast(stmt.else_block, indent + 1, params, locals_set, loop)
