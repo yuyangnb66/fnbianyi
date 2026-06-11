@@ -1,4 +1,4 @@
-"""MiniLang 抽象语法树节点定义。"""
+# MiniLang 抽象语法树节点定义
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ class FuncDecl(Stmt):
     params: List[Tuple[str, str]]
     body: "Block"
     line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -31,6 +32,7 @@ class DeclStmt(Stmt):
     name: str
     array_size: Optional[int] = None
     line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -39,6 +41,7 @@ class AssignStmt(Stmt):
     value: "Expr"
     index: Optional["Expr"] = None
     line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -48,6 +51,7 @@ class IfStmt(Stmt):
     elif_blocks: tuple = ()
     else_block: Optional["Block"] = None
     line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -55,6 +59,7 @@ class WhileStmt(Stmt):
     condition: "Expr"
     body: "Block"
     line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -64,22 +69,26 @@ class ForStmt(Stmt):
     update: Optional[AssignStmt]
     body: "Block"
     line: int = 0
+    col: int = 0
 
 
 @dataclass
 class ReturnStmt(Stmt):
     value: Optional["Expr"]
     line: int = 0
+    col: int = 0
 
 
 @dataclass
 class BreakStmt(Stmt):
     line: int = 0
+    col: int = 0
 
 
 @dataclass
 class ContinueStmt(Stmt):
     line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -88,6 +97,7 @@ class InputStmt(Stmt):
     prompt: Optional[Expr] = None
     type_names: List[str] = field(default_factory=list)
     line: int = 0
+    col: int = 0
 
     @property
     def name(self) -> str:
@@ -99,6 +109,7 @@ class WriteStmt(Stmt):
     path: Expr
     value: Expr
     line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -106,6 +117,14 @@ class PrintStmt(Stmt):
     values: List["Expr"]
     newline: bool = True
     line: int = 0
+    col: int = 0
+
+
+@dataclass
+class ExprStmt(Stmt):
+    expr: Expr
+    line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -120,6 +139,8 @@ class Expr:
 @dataclass
 class IntLit(Expr):
     value: int
+    line: int = 0
+    col: int = 0
 
     def __post_init__(self):
         self.type_name = "int"
@@ -128,6 +149,8 @@ class IntLit(Expr):
 @dataclass
 class FloatLit(Expr):
     value: float
+    line: int = 0
+    col: int = 0
 
     def __post_init__(self):
         self.type_name = "float"
@@ -136,6 +159,8 @@ class FloatLit(Expr):
 @dataclass
 class StringLit(Expr):
     value: str
+    line: int = 0
+    col: int = 0
 
     def __post_init__(self):
         self.type_name = "string"
@@ -145,6 +170,8 @@ class StringLit(Expr):
 class VarExpr(Expr):
     name: str
     type_name: str = "unknown"
+    line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -152,6 +179,8 @@ class ArrayAccessExpr(Expr):
     name: str
     index: Expr
     type_name: str = "unknown"
+    line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -159,6 +188,8 @@ class CallExpr(Expr):
     name: str
     args: List[Expr] = field(default_factory=list)
     type_name: str = "unknown"
+    line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -166,6 +197,8 @@ class UnaryExpr(Expr):
     op: str
     operand: Expr
     type_name: str = "unknown"
+    line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -174,6 +207,8 @@ class BinaryExpr(Expr):
     left: Expr
     right: Expr
     type_name: str = "unknown"
+    line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -182,3 +217,5 @@ class RelExpr(Expr):
     left: Expr
     right: Expr
     type_name: str = "int"
+    line: int = 0
+    col: int = 0
