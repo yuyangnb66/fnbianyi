@@ -146,6 +146,7 @@ class RunWindow(tk.Toplevel):
                     self._append_output(f"\n警告：{content}\n")
                 elif msg_type == "finish":
                     self.program_running = False
+                    self.input_text.config(state=tk.DISABLED)
                     if content:
                         self._append_output("\n程序正常结束\n")
                     else:
@@ -243,6 +244,8 @@ class MiniLangIDE(tk.Tk):
         self.current_file: Path | None = WORKSPACE / "main.ml"
         self.is_modified = False
         self.current_run_window: RunWindow | None = None
+        self.last_compiled_code: str | None = None
+        self.last_compiled_source: str | None = None
 
         ensure_dirs()
         self._build_ui()
@@ -397,7 +400,15 @@ class MiniLangIDE(tk.Tk):
     def _open_output_dir(self) -> None:
         ensure_dirs()
         import os
-        os.startfile(str(OUTPUT_DIR))
+        import subprocess
+        import sys
+        path = str(OUTPUT_DIR)
+        if sys.platform == "win32":
+            os.startfile(path)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", path])
+        else:
+            subprocess.run(["xdg-open", path])
 
     def _clear_panels(self) -> None:
         self._set_text(self.error_text, "")
@@ -439,11 +450,14 @@ class MiniLangIDE(tk.Tk):
         self._save_file()
         self._set_status("正在编译...", "info")
         self.update_idletasks()
-        res = Compiler().compile(self._get_source(), optimize=True, run=False)
+        source = self._get_source()
+        res = Compiler().compile(source, optimize=True, run=False)
         ok = self._show_diagnostics(res)
         if ok:
             out_py = self.current_file.with_suffix(".py") if self.current_file else WORKSPACE / "main.py"
             out_py.write_text(res.target_code, encoding="utf-8")
+            self.last_compiled_code = res.target_code
+            self.last_compiled_source = source
             self._set_status(f"编译成功 → {out_py}", "success")
         else:
             self._set_status(f"编译失败: {len(res.errors)} 个错误", "error")
@@ -500,16 +514,23 @@ class MiniLangIDE(tk.Tk):
         self._save_file()
         self._set_status("正在编译...", "info")
         self.update_idletasks()
-        res = Compiler().compile(self._get_source(), optimize=True, run=False)
+        source = self._get_source()
+        res = Compiler().compile(source, optimize=True, run=False)
         if not self._show_diagnostics(res):
             self._set_status(f"编译失败: {len(res.errors)} 个错误", "error")
             return
         if self.current_file:
             self.current_file.with_suffix(".py").write_text(res.target_code, encoding="utf-8")
+        self.last_compiled_code = res.target_code
+        self.last_compiled_source = source
         self._run_compiled(res.target_code)
 
     def _run(self) -> None:
-        self._compile_and_run()
+        source = self._get_source()
+        if self.last_compiled_source == source and self.last_compiled_code is not None:
+            self._run_compiled(self.last_compiled_code)
+        else:
+            self._set_status("源码已变更，请先编译", "warning")
 
 
 def main() -> None:

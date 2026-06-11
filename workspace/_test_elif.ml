@@ -2,7 +2,7 @@ int x;
 int y;
 string s;
 
-x = 3;
+input(x);
 y = 1;
 
 if (x > 5) {
@@ -26,5 +26,6 @@ if (s == "hello") {
 } else {
     print("other");
 }
+
 
 

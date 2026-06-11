@@ -1,25 +1,95 @@
 MiniLang 语法规则 (BNF)
 ======================
 
-参考 CompilationPrinciple 项目的文法描述方式，本文件为可读版语法库。
-机器可读版本见 grammar.json。
+完整语法定义，与 parser_rd.py / grammar.json 实际实现一致。
+机器可读版见 grammar.json，词法规则见 tokens.json。
 
-Program   → StmtList
-StmtList  → Stmt StmtList | ε
-Stmt      → DeclStmt | AssignStmt | IfStmt | WhileStmt | PrintStmt | Block
+────────────────────────────────────────────────────
+1. 程序结构
+────────────────────────────────────────────────────
 
-DeclStmt  → Type IDENT ';'
-AssignStmt→ IDENT '=' Expr ';'
-IfStmt    → 'if' '(' Logic ')' Block [ 'else' ElifRest ]
-ElifRest  → 'if' '(' Logic ')' Block [ 'else' ElifRest ] | Block
-WhileStmt → 'while' '(' RelExpr ')' Block
-PrintStmt → 'print' '(' RelExpr ')' ';'
-Block     → '{' StmtList '}'
+Program    → TopItem*
 
-Type      → 'int' | 'float'
-RelExpr   → Expr [('=='|'!='|'<'|'<='|'>'|'>=') Expr]
-Expr      → Term [('+'|'-') Term]*
-Term      → Factor [('*'|'/') Factor]*
-Factor    → INT_LIT | FLOAT_LIT | IDENT | '(' RelExpr ')' | '-' Factor
+TopItem    → FuncDecl | Stmt
 
-词法规则见 tokens.json。
+FuncDecl   → Type IDENT '(' ParamList? ')' Block
+ParamList  → Type IDENT (',' Type IDENT)*
+
+────────────────────────────────────────────────────
+2. 类型
+────────────────────────────────────────────────────
+
+Type       → 'int' | 'float' | 'string' | 'void'
+
+────────────────────────────────────────────────────
+3. 语句
+────────────────────────────────────────────────────
+
+Stmt       → DeclStmt | AssignStmt | IfStmt | WhileStmt
+            | ForStmt | PrintStmt | PrintnStmt
+            | InputStmt | WriteStmt | ReturnStmt
+            | BreakStmt | ContinueStmt | Block
+
+DeclStmt   → Type IDENT ArrayOpt? ';'
+ArrayOpt   → '[' INT_LIT ']'
+
+AssignStmt → IDENT IndexOpt? '=' Logic ';'
+IndexOpt   → '[' Logic ']'
+
+IfStmt     → 'if' '(' Logic ')' Block ElseOpt
+ElseOpt    → 'else' (IfStmt | Block) | ε
+
+WhileStmt  → 'while' '(' Logic ')' Block
+
+ForStmt    → 'for' '(' ForInit ForCond ForUpdate ')' Block
+ForInit    → ForAssign ';' | ';'
+ForCond    → Logic ';' | ';'
+ForUpdate  → ForAssign | ε
+ForAssign  → IDENT IndexOpt? '=' Logic
+
+PrintStmt  → 'print' '(' LogicList ')' ';'
+PrintnStmt → 'printn' '(' LogicList ')' ';'
+LogicList  → Logic (',' Logic)*
+
+InputStmt  → 'input' '(' IDENT (',' IDENT)* (',' Logic)? ')' ';'
+
+WriteStmt  → 'write' '(' Logic ',' Logic ')' ';'
+
+ReturnStmt → 'return' Logic? ';'
+
+BreakStmt  → 'break' ';'
+
+ContinueStmt → 'continue' ';'
+
+Block      → '{' Stmt* '}'
+
+────────────────────────────────────────────────────
+4. 表达式
+────────────────────────────────────────────────────
+
+Logic      → LogicAnd ('||' LogicAnd)*
+
+LogicAnd   → LogicNot ('&&' LogicNot)*
+
+LogicNot   → '!' LogicNot | RelExpr
+
+RelExpr    → Expr (RelOp Expr)?
+RelOp      → '==' | '!=' | '<' | '<=' | '>' | '>='
+
+Expr       → Term (('+' | '-') Term)*
+
+Term       → Factor (('*' | '/') Factor)*
+
+Factor     → '-' Factor
+            | IDENT CallOrIndexOpt
+            | INT_LIT | FLOAT_LIT | STRING_LIT
+            | '(' Logic ')'
+
+CallOrIndexOpt → '(' ArgList? ')' | '[' Logic ']' | ε
+ArgList    → Logic (',' Logic)*
+
+────────────────────────────────────────────────────
+5. 注释
+────────────────────────────────────────────────────
+
+// 单行注释（至行末）

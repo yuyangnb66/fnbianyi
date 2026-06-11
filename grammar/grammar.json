@@ -43,7 +43,7 @@
     "ElifRest": [["IF", "LPAREN", "Logic", "RPAREN", "Block", "ElseOpt"], ["Block"]],
     "WhileStmt": [["WHILE", "LPAREN", "Logic", "RPAREN", "Block"]],
     "ForStmt": [["FOR", "LPAREN", "ForInit", "ForCond", "ForUpdate", "RPAREN", "Block"]],
-    "ForInit": [["ForAssign"], ["SEMI"]],
+    "ForInit": [["ForAssign", "SEMI"], ["SEMI"]],
     "ForCond": [["Logic", "SEMI"], ["SEMI"]],
     "ForUpdate": [["ForAssign"], []],
     "ForAssign": [["IDENT", "IndexOpt", "ASSIGN", "Logic"]],
