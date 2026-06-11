@@ -15,7 +15,9 @@ from .lr import ParseTableSet, build_lr_tables
 ParseMethod = str  # LL1 | LR0 | SLR1 | LALR1 | LR1
 
 METHOD_ORDER: List[str] = ["LL1", "LR0", "SLR1", "LALR1", "LR1"]
-FAST_ORDER: List[str] = ["LL1", "LR0", "SLR1"]
+# 按优先级递增尝试，找到无冲突表即停止，避免无谓构建 LR(1)
+SELECT_ORDER: List[str] = ["LL1", "LR0", "SLR1", "LALR1", "LR1"]
+CACHE_VERSION = 2
 
 
 @dataclass
@@ -43,26 +45,34 @@ def _analyze_all(grammar_path: Path) -> Tuple[Grammar, Dict[str, object]]:
         try:
             with open(cache, "rb") as f:
                 payload = pickle.load(f)
-            if payload.get("mtime") == mtime:
+            if payload.get("mtime") == mtime and payload.get("version") == CACHE_VERSION:
                 return payload["grammar"], payload["reports"]
         except Exception:
             pass
 
     grammar = load_grammar(grammar_path)
     reports: Dict[str, object] = {}
-    for m in FAST_ORDER:
-        reports[m] = _build_one(grammar, m)
 
-    slr = reports.get("SLR1")
-    if isinstance(slr, ParseTableSet) and slr.conflicts:
-        reports["LALR1"] = _build_one(grammar, "LALR1")
-        lalr = reports["LALR1"]
-        if isinstance(lalr, ParseTableSet) and lalr.conflicts:
-            reports["LR1"] = _build_one(grammar, "LR1")
+    for name in SELECT_ORDER:
+        if name == "LALR1":
+            slr = reports.get("SLR1")
+            if not isinstance(slr, ParseTableSet) or not slr.conflicts:
+                continue
+        if name == "LR1":
+            lalr = reports.get("LALR1")
+            if not isinstance(lalr, ParseTableSet) or not lalr.conflicts:
+                continue
+
+        reports[name] = _build_one(grammar, name)
+        if not reports[name].conflicts:
+            break
 
     try:
         with open(cache, "wb") as f:
-            pickle.dump({"mtime": mtime, "grammar": grammar, "reports": reports}, f)
+            pickle.dump(
+                {"version": CACHE_VERSION, "mtime": mtime, "grammar": grammar, "reports": reports},
+                f,
+            )
     except Exception:
         pass
     return grammar, reports

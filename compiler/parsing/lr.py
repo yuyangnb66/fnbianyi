@@ -36,19 +36,38 @@ class ParseTableSet:
 def build_lr_tables(grammar: Grammar, method: str) -> ParseTableSet:
     first = compute_first(grammar)
     follow = compute_follow(grammar, first)
-    if method == "LR0":
-        return _build_lr0(grammar, follow)
-    if method == "SLR1":
-        return _build_slr(grammar, follow)
-    if method in ("LALR1", "LR1"):
-        lr1 = _build_lr1(grammar, first)
-        if method == "LR1":
-            return lr1
+    if method in ("LR0", "SLR1", "LR1"):
+        return _build_lr_automaton(grammar, follow, first, method)
+    if method == "LALR1":
+        lr1 = _build_lr_automaton(grammar, follow, first, "LR1")
         return _merge_to_lalr(lr1, grammar)
     raise ValueError(f"未知 LR 方法: {method}")
 
 
-def _closure(items: Set[LRItem], grammar: Grammar, lr1: bool) -> Set[LRItem]:
+def _first_seq(symbols: tuple, first: Dict[str, Set[str]]) -> Set[str]:
+    from .first_follow import _first_of_sequence
+
+    return _first_of_sequence(symbols, first)
+
+
+def _lr1_lookaheads(
+    item: LRItem, prod: Production, first: Dict[str, Set[str]]
+) -> Set[str]:
+    beta = prod.body[item.dot + 1 :]
+    if not beta:
+        return {item.lookahead} if item.lookahead else set()
+    first_beta = _first_seq(beta, first)
+    if EPS in first_beta:
+        la = set(first_beta - {EPS})
+        if item.lookahead:
+            la.add(item.lookahead)
+        return la
+    return first_beta - {EPS}
+
+
+def _closure(
+    items: Set[LRItem], grammar: Grammar, lr1: bool, first: Dict[str, Set[str]]
+) -> Set[LRItem]:
     result = set(items)
     stack = list(items)
     while stack:
@@ -61,7 +80,7 @@ def _closure(items: Set[LRItem], grammar: Grammar, lr1: bool) -> Set[LRItem]:
             continue
         for p in grammar.prod_by_head[sym]:
             if lr1:
-                lookaheads = _lr1_lookaheads(item, prod, grammar, result)
+                lookaheads = _lr1_lookaheads(item, prod, first)
                 for la in lookaheads:
                     ni = LRItem(p.index, 0, la)
                     if ni not in result:
@@ -75,29 +94,13 @@ def _closure(items: Set[LRItem], grammar: Grammar, lr1: bool) -> Set[LRItem]:
     return result
 
 
-def _lr1_lookaheads(
-    item: LRItem, prod: Production, grammar: Grammar, state: Set[LRItem]
-) -> Set[str]:
-    beta = prod.body[item.dot + 1 :]
-    if not beta:
-        return {item.lookahead} if item.lookahead else set()
-    first_beta = _first_seq(beta, grammar)
-    if EPS in first_beta:
-        la = set(first_beta - {EPS})
-        if item.lookahead:
-            la.add(item.lookahead)
-        return la
-    return first_beta - {EPS}
-
-
-def _first_seq(symbols: tuple, grammar: Grammar) -> Set[str]:
-    first = compute_first(grammar)
-    from .first_follow import _first_of_sequence
-
-    return _first_of_sequence(symbols, first)
-
-
-def _goto(items: Set[LRItem], sym: str, grammar: Grammar, lr1: bool) -> Set[LRItem]:
+def _goto(
+    items: Union[Set[LRItem], FrozenSet[LRItem]],
+    sym: str,
+    grammar: Grammar,
+    lr1: bool,
+    first: Dict[str, Set[str]],
+) -> Set[LRItem]:
     moved: Set[LRItem] = set()
     for item in items:
         prod = grammar.productions[item.prod_index]
@@ -105,7 +108,7 @@ def _goto(items: Set[LRItem], sym: str, grammar: Grammar, lr1: bool) -> Set[LRIt
             moved.add(LRItem(item.prod_index, item.dot + 1, item.lookahead))
     if not moved:
         return set()
-    return _closure(moved, grammar, lr1)
+    return _closure(moved, grammar, lr1, first)
 
 
 def _collect_symbols(grammar: Grammar) -> List[str]:
@@ -117,21 +120,29 @@ def _collect_symbols(grammar: Grammar) -> List[str]:
     return sorted(syms)
 
 
-def _build_lr0(grammar: Grammar, follow: Dict[str, Set[str]]) -> ParseTableSet:
+def _build_lr_automaton(
+    grammar: Grammar,
+    follow: Dict[str, Set[str]],
+    first: Dict[str, Set[str]],
+    method: str,
+) -> ParseTableSet:
+    lr1 = method == "LR1"
     start_prod = grammar.prod_by_head[grammar.start][0]
-    start_item = LRItem(start_prod.index, 0)
-    start_set = frozenset(_closure({start_item}, grammar, False))
+    start_item = LRItem(start_prod.index, 0, "$") if lr1 else LRItem(start_prod.index, 0)
+    start_set = frozenset(_closure({start_item}, grammar, lr1, first))
     states: List[FrozenSet[LRItem]] = [start_set]
     state_index: Dict[FrozenSet[LRItem], int] = {start_set: 0}
     action: LRTable = {}
     goto: GotoTable = {}
     conflicts: List[str] = []
+    symbols = _collect_symbols(grammar)
+    use_prec = method in ("LR0", "SLR1")
 
     i = 0
     while i < len(states):
         state = states[i]
-        for sym in _collect_symbols(grammar):
-            nxt = _goto(set(state), sym, grammar, False)
+        for sym in symbols:
+            nxt = _goto(state, sym, grammar, lr1, first)
             if not nxt:
                 continue
             fs = frozenset(nxt)
@@ -140,7 +151,15 @@ def _build_lr0(grammar: Grammar, follow: Dict[str, Set[str]]) -> ParseTableSet:
                 states.append(fs)
             j = state_index[fs]
             if sym in grammar.terminals:
-                _set_action(action, i, sym, ("shift", j), conflicts, "LR0", grammar)
+                _set_action(
+                    action,
+                    i,
+                    sym,
+                    ("shift", j),
+                    conflicts,
+                    method,
+                    grammar if use_prec else None,
+                )
             else:
                 goto[(i, sym)] = j
 
@@ -150,103 +169,39 @@ def _build_lr0(grammar: Grammar, follow: Dict[str, Set[str]]) -> ParseTableSet:
             if not complete:
                 continue
             if prod.head == grammar.start:
-                _set_action(action, i, "$", ("accept", 0), conflicts, "LR0", grammar)
+                la = item.lookahead if lr1 else "$"
+                _set_action(action, i, la, ("accept", 0), conflicts, method)
+            elif lr1:
+                _set_action(
+                    action, i, item.lookahead, ("reduce", prod.index), conflicts, method
+                )
+            elif method == "SLR1":
+                for t in follow.get(prod.head, set()):
+                    if t != "$":
+                        _set_action(
+                            action,
+                            i,
+                            t,
+                            ("reduce", prod.index),
+                            conflicts,
+                            method,
+                            grammar,
+                        )
             else:
                 for t in grammar.terminals:
                     if t != "$":
                         _set_action(
-                            action, i, t, ("reduce", prod.index), conflicts, "LR0", grammar
+                            action,
+                            i,
+                            t,
+                            ("reduce", prod.index),
+                            conflicts,
+                            method,
+                            grammar,
                         )
         i += 1
 
-    return ParseTableSet("LR0", action, goto, states, conflicts, grammar.productions)
-
-
-def _build_slr(grammar: Grammar, follow: Dict[str, Set[str]]) -> ParseTableSet:
-    start_prod = grammar.prod_by_head[grammar.start][0]
-    start_item = LRItem(start_prod.index, 0)
-    start_set = frozenset(_closure({start_item}, grammar, False))
-    states: List[FrozenSet[LRItem]] = [start_set]
-    state_index: Dict[FrozenSet[LRItem], int] = {start_set: 0}
-    action: LRTable = {}
-    goto: GotoTable = {}
-    conflicts: List[str] = []
-
-    i = 0
-    while i < len(states):
-        state = states[i]
-        for sym in _collect_symbols(grammar):
-            nxt = _goto(set(state), sym, grammar, False)
-            if not nxt:
-                continue
-            fs = frozenset(nxt)
-            if fs not in state_index:
-                state_index[fs] = len(states)
-                states.append(fs)
-            j = state_index[fs]
-            if sym in grammar.terminals:
-                _set_action(action, i, sym, ("shift", j), conflicts, "SLR1", grammar)
-            else:
-                goto[(i, sym)] = j
-
-        for item in state:
-            prod = grammar.productions[item.prod_index]
-            complete = item.dot >= len(prod.body) or prod.is_epsilon
-            if not complete:
-                continue
-            if prod.head == grammar.start:
-                _set_action(action, i, "$", ("accept", 0), conflicts, "SLR1", grammar)
-            else:
-                for t in follow.get(prod.head, set()):
-                    if t != "$":
-                        _set_action(
-                            action, i, t, ("reduce", prod.index), conflicts, "SLR1", grammar
-                        )
-        i += 1
-
-    return ParseTableSet("SLR1", action, goto, states, conflicts, grammar.productions)
-
-
-def _build_lr1(grammar: Grammar, first: Dict[str, Set[str]]) -> ParseTableSet:
-    start_prod = grammar.prod_by_head[grammar.start][0]
-    start_item = LRItem(start_prod.index, 0, "$")
-    start_set = frozenset(_closure({start_item}, grammar, True))
-    states: List[FrozenSet[LRItem]] = [start_set]
-    state_index: Dict[FrozenSet[LRItem], int] = {start_set: 0}
-    action: LRTable = {}
-    goto: GotoTable = {}
-    conflicts: List[str] = []
-
-    i = 0
-    while i < len(states):
-        state = states[i]
-        for sym in _collect_symbols(grammar):
-            nxt = _goto(set(state), sym, grammar, True)
-            if not nxt:
-                continue
-            fs = frozenset(nxt)
-            if fs not in state_index:
-                state_index[fs] = len(states)
-                states.append(fs)
-            j = state_index[fs]
-            if sym in grammar.terminals:
-                _set_action(action, i, sym, ("shift", j), conflicts, "LR1")
-            else:
-                goto[(i, sym)] = j
-
-        for item in state:
-            prod = grammar.productions[item.prod_index]
-            if item.dot < len(prod.body):
-                continue
-            if prod.head == grammar.start:
-                _set_action(action, i, item.lookahead, ("accept", 0), conflicts, "LR1")
-            else:
-                _set_action(
-                    action, i, item.lookahead, ("reduce", prod.index), conflicts, "LR1"
-                )
-        i += 1
-
-    return ParseTableSet("LR1", action, goto, states, conflicts, grammar.productions)
+    return ParseTableSet(method, action, goto, states, conflicts, grammar.productions)
 
 
 def _merge_to_lalr(lr1: ParseTableSet, grammar: Grammar) -> ParseTableSet:
@@ -257,7 +212,7 @@ def _merge_to_lalr(lr1: ParseTableSet, grammar: Grammar) -> ParseTableSet:
 
     old_to_new: Dict[int, int] = {}
     merged_states: List[FrozenSet[LRItem]] = []
-    for core, old_indices in core_map.items():
+    for _core, old_indices in core_map.items():
         merged: Set[LRItem] = set()
         for oi in old_indices:
             for item in lr1.states[oi]:
@@ -356,22 +311,10 @@ def resolve_with_precedence(
 def apply_precedence(grammar: Grammar, table: ParseTableSet) -> ParseTableSet:
     """后处理：尝试用优先级消解 shift-reduce 冲突。"""
     action = dict(table.action)
-    resolved: List[str] = []
-    keys = list(action.keys())
-    for key in keys:
-        state, sym = key
-        act = action[key]
-        # 已在冲突列表中的条目尝试消解
-        for other_key, other_act in list(action.items()):
-            if other_key[0] != state or other_key[1] != sym:
-                continue
-        # 简化：遍历 conflicts 不现实，直接跳过
-    # 重新扫描：对同一格若有 shift/reduce 竞争，在 build 时已记录
     new_conflicts = []
     for c in table.conflicts:
         if "shift" in c and "reduce" in c:
             parts = c.split(" vs ")
-            # 保留未消解冲突
             new_conflicts.append(c)
         else:
             new_conflicts.append(c)

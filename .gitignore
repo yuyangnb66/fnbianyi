@@ -5,7 +5,8 @@ workspace/output/*
 !workspace/main.ml
 !workspace/README.txt
 _ref/
-grammar/.parse_tables_cache.pkl
+# 预构建语法分析表缓存（grammar.json 变更后需删除此文件或重新编译一次）
+# grammar/.parse_tables_cache.pkl
 改动词法分析版本/
 
 # 作业目录与压缩包（不提交）
