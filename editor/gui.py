@@ -146,6 +146,7 @@ class RunWindow(tk.Toplevel):
                     self._append_output(f"\n警告：{content}\n")
                 elif msg_type == "finish":
                     self.program_running = False
+                    self.input_text.config(state=tk.DISABLED)
                     if content:
                         self._append_output("\n程序正常结束\n")
                     else:
