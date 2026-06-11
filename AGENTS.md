@@ -33,7 +33,7 @@ python -m compiler.main workspace/main.ml -o out/app.py
 # 打印词法器 NFA/DFA 逐 token 匹配过程
 python -m compiler.main workspace/main.ml --trace
 
-# 运行唯一测试：解析器错误恢复（需 3 秒内完成 35 个恶意输入）
+# 运行唯一测试：解析器错误恢复（3 秒超时，35 个恶意输入）
 python tests/test_parser_recovery.py
 ```
 
@@ -51,28 +51,43 @@ python tests/test_parser_recovery.py
 ### 编译流水线
 
 ```
-源码(.ml) → lexer.py → parser.py → semantic.py → tac.py → optimizer.py → codegen.py → Python(.py)
-              ↑            ↑
-         tokens.json   grammar.json
+源码(.ml) → lexer.py → validator.py → parser.py → semantic.py → tac.py → optimizer.py → codegen.py → Python(.py)
+               ↑                          ↑
+          tokens.json              grammar.json
 ```
 
 各阶段顺序不可改变：前阶段出错会中断流水线（如语义错误不会继续生成目标代码）。
 
+`validator.py` 在词法 Token 流上做静态检查（括号匹配、Tab 缩进禁止、连续 `==` 误用等），独立于语法分析阶段。
+
 ### 词法器（NFA/DFA 引擎）
 
 词法器使用自实现的 NFA/DFA 正则引擎（`compiler/lexer.py` 中的 `RegexParser`、`NFA`、`DFA` 类），**非 Python `re` 模块**。流程：`tokens.json` 中的字符集正则 → Shunting-yard 中缀转后缀 → Thompson 构造 NFA → 子集构造 DFA → 最长匹配取 token。详细原理见 `assets/词法器对比分析.md`。
+
+### 语法分析器（表驱动 + 回退）
+
+主分析器（`parser.py` + `compiler/parsing/`）是表驱动的 LL(1)/LR(0)/SLR(1)/LALR(1)/LR(1) 分析器，从 `grammar.json` 加载 BNF 语法，自动选择可用的最强分析方法。
+
+当表驱动分析器构建失败时，自动回退到 `parser_rd.py`（递归下降分析器）保证功能完整。
+
+**语法分析表缓存**：`grammar/.parse_tables_cache.pkl` 是预构建的语法分析表缓存。若修改 `grammar.json`，必须删除此缓存文件（或重新编译一次），否则会读到过期表。
 
 ### 目录职责
 
 | 目录 | 用途 | 注意 |
 |------|------|------|
 | `compiler/` | 编译器模块 | 无外部导入，纯 stdlib |
+| `compiler/parsing/` | 表驱动解析引擎子模块 | LL(1)/LR 系各算法、FIRST/FOLLOW、AST 构建 |
 | `grammar/` | `tokens.json`（词法规则）、`grammar.json`（BNF 语法） | 由编译器运行时加载 |
 | `editor/gui.py` | Tkinter 桌面 IDE | 无头环境下 Tkinter 可能不可用 |
 | `workspace/` | 用户源码 (`*.ml`) 与 `write()` 输出 (`output/`) | 默认 IDE 打开 `workspace/main.ml` |
 | `tests/` | 包含 `test_parser_recovery.py` | |
 | `assets/` | 设计笔记与词法器分析 | 已被 gitignore |
 | `改动词法分析版本/` | 旧版 DFA 词法器参考副本 | 来自 merge，仅作参考 |
+
+### 错误代码参考
+
+`error.txt` 记录了编译器和静态检查器全量错误代码（E1xx 词法、E2xx 语法、E3xx 语义、E4xx 静态检查、W0xx 警告）。报错格式统一为 `[行:列] E/Wxxx: message`。
 
 ### 代码生成双路径
 
@@ -84,7 +99,7 @@ python tests/test_parser_recovery.py
 
 ### 运行时内置函数
 
-`compiler/runtime.py` 提供生成代码依赖的全局函数：`ml_input`、`ml_write`、`ml_getint`、`ml_split_line`。生成代码中的 `print()`、`input()` 等调用即为标准 Python。
+`compiler/runtime.py` 提供生成代码依赖的全局函数：`ml_input`、`ml_write`、`ml_getint`、`ml_getint_line`、`ml_split_line`、`ml_check_token_count`、`ml_warn`。生成的 Python 代码中这些函数以 `_ml_` 前缀引用（如 `_ml_input`、`_ml_write`）。
 
 ### 错误处理约定
 

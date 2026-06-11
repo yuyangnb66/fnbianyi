@@ -472,6 +472,10 @@ class MiniLangIDE(tk.Tk):
             win.run_finish(not err_flag)
 
     def _run_compiled(self, code: str) -> None:
+        if self.current_run_window is not None and self.current_run_window.winfo_exists():
+            self.current_run_window.window_destroyed = True
+            self.current_run_window.destroy()
+
         reset_handlers()
         self.current_run_window = RunWindow(self)
         win = self.current_run_window

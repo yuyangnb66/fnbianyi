@@ -9,11 +9,12 @@ _ref/
 # grammar/.parse_tables_cache.pkl
 改动词法分析版本/
 
-# 作业目录与压缩包（不提交）
 by/
 by2/
 bywork/
 *.rar
 *.zip
-workspace/_test_sum.ml
-workspace/line_sum.ml
+
+.vscode/
+.obsidian/
+assets/
