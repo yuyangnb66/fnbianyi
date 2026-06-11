@@ -41,6 +41,7 @@ W302: 变量已声明但全程未使用
 W303: 非void类型函数可能缺少 return 语句
 W304: 逻辑运算左操作数类型非常规数值/逻辑类型
 W305: 逻辑运算右操作数类型非常规数值/逻辑类型
+W306: 定义但从未被调用的自定义函数
 """
 from __future__ import annotations
 
@@ -156,6 +157,7 @@ class SemanticAnalyzer:
         self.errors: List[CompileDiagnostic] = []
         self.warnings: List[CompileDiagnostic] = []
         self.loop_depth = 0
+        self.called_functions: Set[str] = set()
 
     def analyze(self, program: Program) -> SemanticResult:
         main_fns = [fn for fn in program.functions if fn.name == "main"]
@@ -175,6 +177,7 @@ class SemanticAnalyzer:
             for stmt in program.statements:
                 if not isinstance(stmt, DeclStmt):
                     self._analyze_stmt(stmt)
+        self._check_uncalled_functions()
         self._check_unused_globals()
         return SemanticResult(
             scope=self.global_scope,
@@ -683,6 +686,7 @@ class SemanticAnalyzer:
                     )
                     self.undeclared_reported.add(expr.name)
                 return "unknown"
+            self.called_functions.add(expr.name)
             if len(expr.args) != len(fn.params):
                 self._err(
                     f"函数 '{expr.name}' 期望 {len(fn.params)} 个参数，实际 {len(expr.args)} 个",
@@ -926,6 +930,20 @@ class SemanticAnalyzer:
             return "bool"
 
         return "unknown"
+
+    # 检测定义但从未被调用的函数
+    def _check_uncalled_functions(self) -> None:
+        for name, fs in self.functions.items():
+            if name == "main":
+                continue
+            if name not in self.called_functions:
+                self._warn(
+                    f"函数 '{name}' 已定义但从未被调用",
+                    fs.line,
+                    fs.col,
+                    "W306",
+                    "删除无用函数，或补充调用逻辑"
+                )
 
     # 检测全局作用域未使用的变量
     def _check_unused_globals(self) -> None:

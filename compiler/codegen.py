@@ -409,11 +409,6 @@ class CodeGenerator:
                 types.append("int")
             refs = [f"_vars[{n!r}]" for n in names]
             return self._gen_multi_input_lines(refs, types, self._ref(ins.arg1))
-        if ins.op == "call" and ins.arg1 == "getint":
-            args = ins.arg2.split(",") if ins.arg2 else []
-            line = self._ref(args[0].strip()) if args else '""'
-            idx = self._ref(args[1].strip()) if len(args) > 1 else "0"
-            return [f"_vars[{ins.result!r}] = _ml_getint(str({line}), int({idx}))"]
         if ins.op == "write":
             return [f"_ml_write(str({self._ref(ins.arg1)}), str({self._ref(ins.arg2)}))"]
         if ins.op == "goto":

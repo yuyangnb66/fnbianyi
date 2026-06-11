@@ -10,6 +10,8 @@ int classify(int x) {
     }
 }
 
+int main() {
+
 int n;
 print("test classify func:");
 n = classify(12);
@@ -20,3 +22,6 @@ n = classify(3);
 print(n);
 n = classify(-1);
 print(n);
+return 0;
+}
+
