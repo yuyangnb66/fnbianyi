@@ -237,7 +237,10 @@ class SemanticAnalyzer:
             )
         )
 
-    def _warn(self, message: str, line: int, col: int, code: str = "W300", suggestion: str = "") -> None:
+    def _warn(self, message: str, line: int = 0, col: int | str = 0, code: str = "W300", suggestion: str = "") -> None:
+        if isinstance(col, str):
+            code = col
+            col = 0
         self.warnings.append(
             diagnostic(
                 Stage.SEMANTIC,
