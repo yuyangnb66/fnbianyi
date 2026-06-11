@@ -398,7 +398,15 @@ class MiniLangIDE(tk.Tk):
     def _open_output_dir(self) -> None:
         ensure_dirs()
         import os
-        os.startfile(str(OUTPUT_DIR))
+        import subprocess
+        import sys
+        path = str(OUTPUT_DIR)
+        if sys.platform == "win32":
+            os.startfile(path)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", path])
+        else:
+            subprocess.run(["xdg-open", path])
 
     def _clear_panels(self) -> None:
         self._set_text(self.error_text, "")
