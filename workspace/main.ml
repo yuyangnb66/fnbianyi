@@ -1,31 +1,36 @@
+int n;
 int x;
-int y;
-string s;
+int i;
+int j;
+int row_sum;
+int total;
+int t;
+string line;
 
-x = 3;
-y = 1;
+print("请输入行数 n 和每行个数 x（空格分隔）:");
+input(n, x, "> ");
 
-if (x > 5) {
-    print("x > 5");
-} else if (x > 0) {
-    print("x > 0");
-    if (y == 1) {
-        print("y == 1 (nested if)");
+total = 0;
+i = 0;
+while (i < n) {
+    print("请输入第",i+1,"行数据");
+    
+    input(line, "> ");
+
+    row_sum = 0;
+    j = 0;
+    while (j < x) {
+        t = getint(line, j);
+        row_sum = row_sum + t;
+        j = j + 1;
     }
-} else if (x == 0) {
-    print("x == 0");
-} else {
-    print("x < 0");
+    print("本行之和:");
+    print(row_sum);
+
+    total = total + row_sum;
+    i = i + 1;
 }
 
-s = "hello";
-if (s == "hello") {
-    print("string compare ok");
-} else if (s == "world") {
-    print("world");
-} else {
-    print("other");
-}
-
-
+print("总和:");
+print(total);
 

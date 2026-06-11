@@ -100,6 +100,7 @@ class RunWindow(tk.Toplevel):
             return "break"
 
         self.input_queue.put(content)
+        self._append_output(f"{content}\n")
         self.input_text.insert(tk.END, "\n")
         return "break"
 
@@ -108,6 +109,14 @@ class RunWindow(tk.Toplevel):
 
     def gui_output(self, text: str):
         self.msg_queue.put(("output", text))
+
+    def gui_print(self, *args, sep: str = " ", end: str = "\n", **kwargs) -> None:
+        """模拟 Python print，保证 GUI 输出区按行显示。"""
+        if kwargs:
+            # 忽略 file/flush 等 CLI 专用参数
+            pass
+        text = sep.join(str(a) for a in args) + end
+        self.gui_output(text)
 
     def gui_warn(self, text: str):
         self.msg_queue.put(("warn", text))
@@ -450,7 +459,7 @@ class MiniLangIDE(tk.Tk):
             "_ml_getint_line": rt.ml_getint_line,
             "_ml_warn": win.gui_warn,
             "_ml_check_token_count": rt.ml_check_token_count,
-            "print": win.gui_output
+            "print": win.gui_print
         }
         err_flag = False
         try:
