@@ -405,58 +405,35 @@ class SemanticAnalyzer:
                     )
 
         elif isinstance(stmt, IfStmt):
-            cond_type = self._check_expr(stmt.condition)
-            if cond_type is None:
-                return
-            # 条件表达式布尔校验 
-            self._check_condition(stmt.condition)
-
+            self._check_condition(stmt.condition, stmt.line)
             if not stmt.then_block.statements:
                 self._warn(
                     "if 语句分支代码块为空",
                     stmt.line,
                     stmt.col,
                     "W301",
-                    "为空代码块补充逻辑，或删除多余的if结构"
+                    "为空代码块补充逻辑，或删除多余的if结构",
                 )
-            # 分支路径判断
-            old_all_return = self.all_path_return
             self._analyze_block(stmt.then_block)
             for elif_cond, elif_block in stmt.elif_blocks:
                 self._check_condition(elif_cond, stmt.line)
                 self._analyze_block(elif_block)
             if stmt.else_block:
-                self.all_path_return = old_all_return
                 self._analyze_block(stmt.else_block)
-                else_has_ret = self.has_return
-                # 双分支：仅当两个分支都有return，才算全路径返回
-                self.all_path_return = then_has_ret and else_has_ret
-            else:
-                self.all_path_return = False
 
         elif isinstance(stmt, WhileStmt):
-            cond_type = self._check_expr(stmt.condition)
-            if cond_type is None:
-                return
-            # while条件表达式布尔校验
-            self._check_condition(stmt.condition)
-            # 上下文栈标记循环
-            self.context_stack.append("loop")
+            self._check_condition(stmt.condition, stmt.line)
+            self.loop_depth += 1
             self._analyze_block(stmt.body)
-            self.context_stack.pop()
+            self.loop_depth -= 1
 
         elif isinstance(stmt, ForStmt):
             if stmt.init:
                 self._analyze_stmt(stmt.init)
-            cond_type = self._check_expr(stmt.condition)
-            if cond_type is None:
-                return
-            # for条件表达式布尔校验
-            self._check_condition(stmt.condition)
-            # 上下文栈标记循环
-            self.context_stack.append("loop")
+            self._check_condition(stmt.condition, stmt.line)
+            self.loop_depth += 1
             self._analyze_block(stmt.body)
-            self.context_stack.pop()
+            self.loop_depth -= 1
             if stmt.update:
                 self._analyze_stmt(stmt.update)
 
@@ -481,23 +458,23 @@ class SemanticAnalyzer:
                 elif self.current_function.return_type != "void":
                     self._err("非 void 函数 return 必须带返回值", stmt.line, "E318")
         elif isinstance(stmt, BreakStmt):
-            if "loop" not in self.context_stack:
+            if self.loop_depth == 0:
                 self._err(
                     "break 语句出现在循环外部",
                     stmt.line,
                     stmt.col,
                     "E318",
-                    "删除循环外的break语句，或将其移入循环中"
+                    "删除循环外的break语句，或将其移入循环中",
                 )
 
         elif isinstance(stmt, ContinueStmt):
-            if "loop" not in self.context_stack:
+            if self.loop_depth == 0:
                 self._err(
                     "continue 语句出现在循环外部",
                     stmt.line,
                     stmt.col,
                     "E319",
-                    "删除循环外的continue语句，或将其移入循环中"
+                    "删除循环外的continue语句，或将其移入循环中",
                 )
 
         elif isinstance(stmt, PrintStmt):
@@ -597,8 +574,10 @@ class SemanticAnalyzer:
             return self._block_return_state(stmt)
         return self.RET_NEVER
 
-    def _check_condition(self, expr: Expr, line: int) -> None:
-        t = self._check_expr(expr, line)
+    def _check_condition(self, expr: Expr, line: int = 0) -> None:
+        t = self._check_expr(expr, line or getattr(expr, "line", 0))
+        if t is None:
+            return
         if isinstance(expr, RelExpr):
             return
         if isinstance(expr, BinaryExpr) and expr.op in ("&&", "||"):
@@ -606,19 +585,12 @@ class SemanticAnalyzer:
         if t in self.NUMERIC or t in self.LOGIC:
             return
         if t != "unknown":
-            self._err("条件表达式类型无效", line, "E305")
-
-    def _check_condition(self, expr: Expr) -> None:
-        t = self._check_expr(expr)
-        if t is None or t == "unknown":
-            return
-        if t not in self.BOOL:
             self._err(
                 "条件表达式类型不符合要求",
-                expr.line,
-                expr.col,
+                getattr(expr, "line", line),
+                getattr(expr, "col", 0),
                 "E304",
-                "条件表达式请使用关系运算、逻辑运算生成布尔值"
+                "条件表达式请使用关系运算、逻辑运算生成布尔值",
             )
 
     # 递归检查表达式类型

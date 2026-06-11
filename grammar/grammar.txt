@@ -10,7 +10,8 @@ Stmt      → DeclStmt | AssignStmt | IfStmt | WhileStmt | PrintStmt | Block
 
 DeclStmt  → Type IDENT ';'
 AssignStmt→ IDENT '=' Expr ';'
-IfStmt    → 'if' '(' RelExpr ')' Block { 'else' 'if' '(' RelExpr ')' Block } [ 'else' Block ]
+IfStmt    → 'if' '(' Logic ')' Block [ 'else' ElifRest ]
+ElifRest  → 'if' '(' Logic ')' Block [ 'else' ElifRest ] | Block
 WhileStmt → 'while' '(' RelExpr ')' Block
 PrintStmt → 'print' '(' RelExpr ')' ';'
 Block     → '{' StmtList '}'

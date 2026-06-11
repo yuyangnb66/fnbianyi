@@ -14,7 +14,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from compiler import Compiler
-from compiler.runtime import OUTPUT_DIR, WORKSPACE, ensure_dirs, reset_handlers, set_input_handler, set_warn_handler, set_write_handler
+from compiler.runtime import (
+    OUTPUT_DIR, WORKSPACE, ensure_dirs, reset_handlers,
+    set_input_handler, set_write_handler, set_warn_handler
+)
 
 DEFAULT_SOURCE = """print("Hello, MiniLang!");"""
 
@@ -302,21 +305,13 @@ class MiniLangIDE(tk.Tk):
         self.run_status_label = ttk.Label(err_container, text="就绪", font=("Segoe UI", 10))
         self.run_status_label.pack(side=tk.RIGHT, anchor=tk.NE, padx=5)
 
-        # 用 tk.Label：Windows 下 ttk.Label 的 foreground 常被主题忽略
-        self.status = tk.Label(
-            self,
-            text="F5 编译运行 | Ctrl+S 保存 | 支持 string[i]、len()、数组(栈/队列)",
-            anchor=tk.W,
-            padx=8,
-            pady=4,
-            fg=STATUS_OK,
-        )
-        self.status.pack(fill=tk.X, side=tk.BOTTOM)
+        paned.add(err_frame, weight=1)
 
-        self.error_text.tag_configure("diag_error", foreground=STATUS_ERR)
-        self.error_text.tag_configure("diag_warn", foreground=STATUS_WARN)
-        self.error_text.tag_configure("diag_ok", foreground=STATUS_OK)
 
+    def _bind_events(self) -> None:
+        # 全局快捷键
+        self.bind("<Control-n>", lambda e: self._new_file())
+        self.bind("<Control-o>", lambda e: self._open_file())
         self.bind("<Control-s>", lambda e: self._save_file())
         self.bind("<Control-Shift-s>", lambda e: self._save_as_file())
         self.bind("<F5>", lambda e: self._compile_and_run())
@@ -405,14 +400,15 @@ class MiniLangIDE(tk.Tk):
         widget.insert("1.0", content)
         widget.config(state=tk.DISABLED)
 
-    def _set_status(self, msg: str, ok: bool = True, warn: bool = False) -> None:
-        if warn:
-            color = STATUS_WARN
-        elif ok:
-            color = STATUS_OK
-        else:
-            color = STATUS_ERR
-        self.status.config(text=msg, fg=color)
+    # 状态文字渲染：现在显示在错误面板右侧标签
+    def _set_status(self, msg: str, status: str = "success") -> None:
+        color_map = {
+            "success": COLORS["success"],
+            "error": COLORS["error"],
+            "warning": COLORS["warning"],
+            "info": COLORS["info"]
+        }
+        self.run_status_label.config(text=msg, foreground=color_map.get(status, COLORS["status_fg"]))
 
     def _get_source(self) -> str:
         return self.editor.get("1.0", tk.END)
@@ -421,29 +417,13 @@ class MiniLangIDE(tk.Tk):
         self.error_text.config(state=tk.NORMAL)
         self.error_text.delete("1.0", tk.END)
         if not result.errors and not result.warnings:
-            self.error_text.insert(tk.END, "无错误或警告\n", "diag_ok")
+            self.error_text.insert("1.0", "✅ 无错误或警告", "success")
         else:
             for e in result.errors:
-                self.error_text.insert(
-                    tk.END,
-                    f"错误 [{e.stage}] L{e.line}: {e.message}\n",
-                    "diag_error",
-                )
+                self.error_text.insert(tk.END, str(e) + "\n\n", "error")
             for w in result.warnings:
-                self.error_text.insert(
-                    tk.END,
-                    f"警告 [{w.stage}] L{w.line}: {w.message}\n",
-                    "diag_warn",
-                )
+                self.error_text.insert(tk.END, str(w) + "\n\n", "warning")
         self.error_text.config(state=tk.DISABLED)
-        if result.errors:
-            self._set_status(f"编译失败 — {len(result.errors)} 个错误", ok=False)
-        elif result.warnings:
-            self._set_status(
-                f"编译完成 — {len(result.warnings)} 个警告",
-                ok=True,
-                warn=True,
-            )
         return result.success
 
     def _compile_only(self) -> None:
@@ -454,46 +434,25 @@ class MiniLangIDE(tk.Tk):
         ok = self._show_diagnostics(res)
         if ok:
             out_py = self.current_file.with_suffix(".py") if self.current_file else WORKSPACE / "main.py"
-            out_py.write_text(result.target_code, encoding="utf-8")
-            self._set_text(self.output_text, f"编译成功\n目标代码 → {out_py}")
-            if not result.warnings:
-                self._set_status("编译成功")
+            out_py.write_text(res.target_code, encoding="utf-8")
+            self._set_status(f"编译成功 → {out_py}", "success")
         else:
-            self._set_text(self.output_text, "编译失败，请查看错误面板")
+            self._set_status(f"编译失败: {len(res.errors)} 个错误", "error")
 
-    def _gui_input(self, prompt: str) -> str:
-        self.update_idletasks()
-        val = simpledialog.askstring("程序输入", prompt or "请输入:", parent=self)
-        return val or ""
-
-    def _on_write_notify(self, path: Path, content: str) -> None:
-        msg = f"\n[已写入文件] {path}\n内容: {content}\n"
-        self.output_text.config(state=tk.NORMAL)
-        self.output_text.insert(tk.END, msg)
-        self.output_text.config(state=tk.DISABLED)
-        self.output_text.see(tk.END)
-
-    def _gui_warn(self, message: str) -> None:
-        self.output_text.config(state=tk.NORMAL)
-        self.output_text.insert(tk.END, message + "\n")
-        self.output_text.config(state=tk.DISABLED)
-        self.output_text.see(tk.END)
-
-    def _run_compiled(self, code: str) -> None:
-        reset_handlers()
-        set_input_handler(self._gui_input)
-        set_write_handler(self._on_write_notify)
-        set_warn_handler(self._gui_warn)
-
-        from compiler.runtime import runtime_globals
-
-        self._set_text(self.output_text, "")
-        live_out = _LiveStdout(self.output_text, self)
-        old_out = sys.stdout
-        sys.stdout = live_out
-        globs = {"__name__": "__main__"}
-        globs.update(runtime_globals())
-        err = False
+    def _run_code_thread(self, code: str, win: RunWindow):
+        import compiler.runtime as rt
+        globs = {
+            "__name__": "__main__",
+            "_ml_input": win.gui_input,
+            "_ml_write": rt.ml_write,
+            "_ml_split_line": rt.ml_split_line,
+            "_ml_getint": rt.ml_getint,
+            "_ml_getint_line": rt.ml_getint_line,
+            "_ml_warn": win.gui_warn,
+            "_ml_check_token_count": rt.ml_check_token_count,
+            "print": win.gui_output
+        }
+        err_flag = False
         try:
             exec(compile(code, "<generated>", "exec"), globs)
         except Exception as e:
@@ -526,9 +485,11 @@ class MiniLangIDE(tk.Tk):
 
     def _compile_and_run(self) -> None:
         self._save_file()
-        result = Compiler().compile(self._get_source(), optimize=True, run=False)
-        if not self._show_diagnostics(result):
-            self._set_text(self.output_text, "编译失败，无法运行")
+        self._set_status("正在编译...", "info")
+        self.update_idletasks()
+        res = Compiler().compile(self._get_source(), optimize=True, run=False)
+        if not self._show_diagnostics(res):
+            self._set_status(f"编译失败: {len(res.errors)} 个错误", "error")
             return
         if self.current_file:
             self.current_file.with_suffix(".py").write_text(res.target_code, encoding="utf-8")

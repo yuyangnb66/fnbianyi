@@ -191,11 +191,31 @@ def _build_if(node: PTNode) -> Optional[IfStmt]:
     then_b = _build_block(node.child(4))
     if not cond or not then_b:
         return None
-    else_b = None
     else_opt = node.child(5) if len(node.children) > 5 else None
-    if else_opt and else_opt.children:
-        else_b = _build_block(else_opt.child(1))
-    return IfStmt(cond, then_b, else_b, node.child(0).line())
+    elif_blocks, else_b = _build_else_opt(else_opt)
+    return IfStmt(cond, then_b, tuple(elif_blocks), else_b, node.child(0).line())
+
+
+def _build_else_opt(node: Optional[PTNode]) -> Tuple[List[Tuple[Expr, Block]], Optional[Block]]:
+    if not node or not node.children:
+        return [], None
+    return _build_elif_rest(node.child(1))
+
+
+def _build_elif_rest(node: Optional[PTNode]) -> Tuple[List[Tuple[Expr, Block]], Optional[Block]]:
+    if not node or not node.children:
+        return [], None
+    if node.children[0].symbol == "IF":
+        elif_blocks: List[Tuple[Expr, Block]] = []
+        cond = _build_logic(node.child(2))
+        blk = _build_block(node.child(4))
+        if cond and blk:
+            elif_blocks.append((cond, blk))
+        tail = node.child(5) if len(node.children) > 5 else None
+        more_elif, else_b = _build_else_opt(tail)
+        elif_blocks.extend(more_elif)
+        return elif_blocks, else_b
+    return [], _build_block(node.child(0))
 
 
 def _build_while(node: PTNode) -> Optional[WhileStmt]:

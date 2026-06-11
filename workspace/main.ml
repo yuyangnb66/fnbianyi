@@ -1,15 +1,30 @@
-int sum(int a, int b) {
-    int c;
-    c = a + b;
-    return c;
-}
-int main() {int n;
 int x;
-input(n,x);
-int c;
-c = sum (n,x);
-print(c);
-return 0;
+int y;
+string s;
+
+x = 3;
+y = 1;
+
+if (x > 5) {
+    print("x > 5");
+} else if (x > 0) {
+    print("x > 0");
+    if (y == 1) {
+        print("y == 1 (nested if)");
+    }
+} else if (x == 0) {
+    print("x == 0");
+} else {
+    print("x < 0");
+}
+
+s = "hello";
+if (s == "hello") {
+    print("string compare ok");
+} else if (s == "world") {
+    print("world");
+} else {
+    print("other");
 }
 
 
