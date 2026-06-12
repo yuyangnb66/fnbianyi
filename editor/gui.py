@@ -437,7 +437,7 @@ class MiniLangIDE(tk.Tk):
         self.error_text.config(state=tk.NORMAL)
         self.error_text.delete("1.0", tk.END)
         if not result.errors and not result.warnings:
-            self.error_text.insert("1.0", "✅ 无错误或警告", "success")
+            self.error_text.insert("1.0", "无错误或警告", "success")
         else:
             for e in result.errors:
                 self.error_text.insert(tk.END, str(e) + "\n\n", "error")
