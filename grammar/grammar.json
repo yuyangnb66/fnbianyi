@@ -1,83 +1,49 @@
 {
-  "description": "MiniLang 完整 BNF — 供 LL(1)/LR 表驱动语法分析",
+  "description": "MiniLang 语法规则库 (BNF) — 供文档与语法分析参考",
   "start": "Program",
-  "epsilon": "ε",
-  "precedence": [
-    {"terminals": ["OR"], "assoc": "left", "level": 1},
-    {"terminals": ["AND"], "assoc": "left", "level": 2},
-    {"terminals": ["EQ", "NE", "LT", "LE", "GT", "GE"], "assoc": "left", "level": 3},
-    {"terminals": ["PLUS", "MINUS"], "assoc": "left", "level": 4},
-    {"terminals": ["STAR", "SLASH"], "assoc": "left", "level": 5},
-    {"terminals": ["NOT", "UMINUS"], "assoc": "right", "level": 6}
-  ],
   "productions": {
-    "Program": [["TopList"]],
-    "TopList": [["TopItem", "TopList"], []],
-    "TopItem": [["FuncDecl"], ["Stmt"]],
-    "FuncDecl": [["TypeTok", "IDENT", "LPAREN", "ParamListOpt", "RPAREN", "Block"]],
-    "ParamListOpt": [["ParamList"], []],
-    "ParamList": [["TypeTok", "IDENT", "ParamTail"]],
-    "ParamTail": [["COMMA", "TypeTok", "IDENT", "ParamTail"], []],
-    "TypeTok": [["INT"], ["FLOAT"], ["STRING"], ["VOID"]],
+    "Program": [["StmtList"]],
+    "StmtList": [["Stmt", "StmtList"], []],
     "Stmt": [
       ["DeclStmt"],
       ["AssignStmt"],
       ["IfStmt"],
       ["WhileStmt"],
-      ["ForStmt"],
       ["PrintStmt"],
-      ["PrintnStmt"],
-      ["InputStmt"],
-      ["WriteStmt"],
-      ["ReturnStmt"],
-      ["BreakStmt"],
-      ["ContinueStmt"],
       ["Block"]
     ],
-    "DeclStmt": [["TypeTok", "IDENT", "ArrayOpt", "SEMI"]],
-    "ArrayOpt": [["LBRACKET", "INT_LIT", "RBRACKET"], []],
-    "AssignStmt": [["IDENT", "IndexOpt", "ASSIGN", "Logic", "SEMI"]],
-    "IndexOpt": [["LBRACKET", "Logic", "RBRACKET"], []],
-    "IfStmt": [["IF", "LPAREN", "Logic", "RPAREN", "Block", "ElseOpt"]],
-    "ElseOpt": [["ELSE", "Block"]],
-    "WhileStmt": [["WHILE", "LPAREN", "Logic", "RPAREN", "Block"]],
-    "ForStmt": [["FOR", "LPAREN", "ForInit", "ForCond", "ForUpdate", "RPAREN", "Block"]],
-    "ForInit": [["ForAssign"], ["SEMI"]],
-    "ForCond": [["Logic", "SEMI"], ["SEMI"]],
-    "ForUpdate": [["ForAssign"], []],
-    "ForAssign": [["IDENT", "IndexOpt", "ASSIGN", "Logic"]],
-    "PrintStmt": [["PRINT", "LPAREN", "LogicList", "RPAREN", "SEMI"]],
-    "PrintnStmt": [["PRINTN", "LPAREN", "LogicList", "RPAREN", "SEMI"]],
-    "LogicList": [["Logic", "LogicListTail"]],
-    "LogicListTail": [["COMMA", "Logic", "LogicListTail"], []],
-    "InputStmt": [["INPUT", "LPAREN", "InputArgs", "RPAREN", "SEMI"]],
-    "InputArgs": [["IDENT", "InputTail"]],
-    "InputTail": [["COMMA", "IDENT", "InputTail"], ["COMMA", "Logic"], []],
-    "WriteStmt": [["WRITE", "LPAREN", "Logic", "COMMA", "Logic", "RPAREN", "SEMI"]],
-    "ReturnStmt": [["RETURN", "ReturnRest"]],
-    "ReturnRest": [["Logic", "SEMI"], ["SEMI"]],
-    "BreakStmt": [["BREAK", "SEMI"]],
-    "ContinueStmt": [["CONTINUE", "SEMI"]],
-    "Block": [["LBRACE", "BlockStmtList", "RBRACE"]],
-    "BlockStmtList": [["Stmt", "BlockStmtList"], []],
-    "Logic": [["Logic", "OR", "LogicAnd"], ["LogicAnd"]],
-    "LogicAnd": [["LogicAnd", "AND", "LogicNot"], ["LogicNot"]],
-    "LogicNot": [["NOT", "LogicNot"], ["RelExpr"]],
-    "RelExpr": [["Expr", "RelOp", "Expr"], ["Expr"]],
-    "RelOp": [["EQ"], ["NE"], ["LT"], ["LE"], ["GT"], ["GE"]],
-    "Expr": [["Expr", "PLUS", "Term"], ["Expr", "MINUS", "Term"], ["Term"]],
-    "Term": [["Term", "STAR", "Factor"], ["Term", "SLASH", "Factor"], ["Factor"]],
+    "DeclStmt": [["Type", "IDENT", "SEMI"]],
+    "AssignStmt": [["IDENT", "ASSIGN", "Expr", "SEMI"]],
+    "IfStmt": [
+      ["IF", "LPAREN", "Expr", "RPAREN", "Block"],
+      ["IF", "LPAREN", "Expr", "RPAREN", "Block", "ELSE", "Block"]
+    ],
+    "WhileStmt": [["WHILE", "LPAREN", "Expr", "RPAREN", "Block"]],
+    "PrintStmt": [["PRINT", "LPAREN", "Expr", "RPAREN", "SEMI"]],
+    "Block": [["LBRACE", "StmtList", "RBRACE"]],
+    "Type": [["INT"], ["FLOAT"]],
+    "Expr": [
+      ["Term", "AddOp", "Expr"],
+      ["Term"]
+    ],
+    "AddOp": [["PLUS"], ["MINUS"]],
+    "Term": [
+      ["Factor", "MulOp", "Term"],
+      ["Factor"]
+    ],
+    "MulOp": [["STAR"], ["SLASH"]],
     "Factor": [
-      ["MINUS", "Factor"],
       ["INT_LIT"],
       ["FLOAT_LIT"],
-      ["STRING_LIT"],
-      ["IDENT", "CallOrIndexOpt"],
-      ["LPAREN", "Logic", "RPAREN"]
+      ["IDENT"],
+      ["LPAREN", "Expr", "RPAREN"],
+      ["MINUS", "Factor"]
     ],
-    "CallOrIndexOpt": [["LPAREN", "ArgListOpt", "RPAREN"], ["LBRACKET", "Logic", "RBRACKET"], []],
-    "ArgListOpt": [["Logic", "ArgListTail"], []],
-    "ArgListTail": [["COMMA", "Logic", "ArgListTail"], []]
+    "RelExpr": [
+      ["Expr", "RelOp", "Expr"],
+      ["Expr"]
+    ],
+    "RelOp": [["EQ"], ["NE"], ["LT"], ["LE"], ["GT"], ["GE"]]
   },
-  "notes": "表驱动语法分析：LL(1)/LR(0)/SLR(1)/LALR(1)/LR(1) 自动选法"
+  "notes": "实际解析器使用递归下降；条件表达式 RelExpr 在 If/While 中使用"
 }

@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from .input_check import while_getint_bound
 from .ast_nodes import (
     ArrayAccessExpr,
     AssignStmt,
@@ -75,14 +74,12 @@ class TACProgram:
     instructions: List[TACInstr] = field(default_factory=list)
     functions: List[TACInstr] = field(default_factory=list)
 
-
 class TACGenerator:
     def __init__(self):
         self.program = TACProgram()
         self.temp_count = 0
         self.label_count = 0
         self.loop_stack: List[Tuple[str, str]] = []
-        self.getint_bound_stack: List[Optional[Tuple[str, str]]] = []
 
     def _new_temp(self) -> str:
         self.temp_count += 1
@@ -93,16 +90,10 @@ class TACGenerator:
         return f"{prefix}{self.label_count}"
 
     def generate(self, program: Program) -> TACProgram:
-        main_fn = next((fn for fn in program.functions if fn.name == "main"), None)
         for fn in program.functions:
-            if fn.name != "main":
-                self._gen_function(fn)
+            self._gen_function(fn)
         for stmt in program.statements:
-            if isinstance(stmt, DeclStmt):
-                self._gen_stmt(stmt)
-        if not main_fn:
-            exec_stmts = [s for s in program.statements if not isinstance(s, DeclStmt)]
-            self._gen_stmt_list(exec_stmts, self.program.instructions)
+            self._gen_stmt(stmt)
         return self.program
 
     def _gen_function(self, fn: FuncDecl) -> None:
@@ -112,14 +103,11 @@ class TACGenerator:
         )
         for ptype, pname in fn.params:
             self.program.functions.append(TACInstr("decl", ptype, "", pname))
-        self._gen_stmt_list(fn.body.statements, self.program.functions)
+        for stmt in fn.body.statements:
+            self._gen_stmt(stmt, target=self.program.functions)
         self.program.functions.append(TACInstr("endfunc", fn.name))
 
-    def _gen_stmt_list(self, stmts: List[Stmt], out: List[TACInstr]) -> None:
-        for i, stmt in enumerate(stmts):
-            self._gen_stmt(stmt, out, stmts[i + 1 :])
-
-    def _gen_stmt(self, stmt: Stmt, target: Optional[List[TACInstr]] = None, following: Optional[List[Stmt]] = None) -> None:
+    def _gen_stmt(self, stmt: Stmt, target: Optional[List[TACInstr]] = None) -> None:
         out = target if target is not None else self.program.instructions
         old_out = getattr(self, "_out", None)
         self._out = out
@@ -166,7 +154,8 @@ class TACGenerator:
                 if self.loop_stack:
                     out.append(TACInstr("goto", "", "", self.loop_stack[-1][1]))
             elif isinstance(stmt, Block):
-                self._gen_stmt_list(stmt.statements, out)
+                for s in stmt.statements:
+                    self._gen_stmt(s, out)
         finally:
             self._out = old_out if old_out is not None else self.program.instructions
 
@@ -176,29 +165,27 @@ class TACGenerator:
         end_label = self._new_label("endif")
         if stmt.else_block:
             out.append(TACInstr("ifFalse", cond, "", else_label))
-            self._gen_stmt_list(stmt.then_block.statements, out)
+            self._gen_stmt(stmt.then_block, out)
             out.append(TACInstr("goto", "", "", end_label))
             out.append(TACInstr("label", "", "", else_label))
-            self._gen_stmt_list(stmt.else_block.statements, out)
+            self._gen_stmt(stmt.else_block, out)
             out.append(TACInstr("label", "", "", end_label))
         else:
             out.append(TACInstr("ifFalse", cond, "", end_label))
-            self._gen_stmt_list(stmt.then_block.statements, out)
+            self._gen_stmt(stmt.then_block, out)
             out.append(TACInstr("label", "", "", end_label))
 
     def _gen_while(self, stmt: WhileStmt, out: List[TACInstr]) -> None:
         start = self._new_label("while")
         end = self._new_label("endwhile")
         self.loop_stack.append((end, start))
-        self.getint_bound_stack.append(while_getint_bound(stmt.condition, stmt.body))
         out.append(TACInstr("label", "", "", start))
         cond = self._gen_condition(stmt.condition, out)
         out.append(TACInstr("ifFalse", cond, "", end))
-        self._gen_stmt_list(stmt.body.statements, out)
+        self._gen_stmt(stmt.body, out)
         out.append(TACInstr("goto", "", "", start))
         out.append(TACInstr("label", "", "", end))
         self.loop_stack.pop()
-        self.getint_bound_stack.pop()
 
     def _gen_for(self, stmt: ForStmt, out: List[TACInstr]) -> None:
         if stmt.init:
@@ -210,7 +197,7 @@ class TACGenerator:
         out.append(TACInstr("label", "", "", start))
         cond = self._gen_condition(stmt.condition, out)
         out.append(TACInstr("ifFalse", cond, "", end))
-        self._gen_stmt_list(stmt.body.statements, out)
+        self._gen_stmt(stmt.body, out)
         out.append(TACInstr("label", "", "", update))
         if stmt.update:
             self._gen_stmt(stmt.update, out)
@@ -252,17 +239,6 @@ class TACGenerator:
             out.append(TACInstr("array_get", idx, expr.name, temp))
             return temp
         if isinstance(expr, CallExpr):
-            if expr.name == "getint" and len(expr.args) == 2:
-                line = self._gen_expr(expr.args[0], out)
-                idx = expr.args[1]
-                idx_name = idx.name if isinstance(idx, VarExpr) else self._gen_expr(idx, out)
-                temp = self._new_temp()
-                bound = self.getint_bound_stack[-1] if self.getint_bound_stack else None
-                if bound and isinstance(idx, VarExpr) and idx.name == bound[0]:
-                    out.append(TACInstr("getint_checked", line, f"{idx.name}|{bound[1]}", temp))
-                else:
-                    out.append(TACInstr("call", "getint", f"{line},{idx_name}", temp))
-                return temp
             args = ",".join(self._gen_expr(a, out) for a in expr.args)
             temp = self._new_temp()
             out.append(TACInstr("call", expr.name, args, temp))

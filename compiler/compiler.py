@@ -69,23 +69,23 @@ class Compiler:
         source: str,
         optimize: bool = True,
         run: bool = False,
-        trace: bool = False,
     ) -> CompileResult:
         result = CompileResult(source=source)
         has_error_token = False
 
         # 1. 词法分析
         try:
-            lex_result = Lexer(source, self.tokens_path, trace=trace).tokenize()
+            lex_result = Lexer(source, self.tokens_path, trace=False).tokenize()
             result.tokens = lex_result.tokens
             result.errors.extend(lex_result.errors)
             has_error_token = any(t.kind == "ERROR" for t in result.tokens)
             result.stages_completed.append("词法分析")
         except Exception as e:
+            debug_info = f"\n[编译器内部错误堆栈]\n{traceback.format_exc()}" if __debug__ else ""
             result.errors.append(
                 CompileDiagnostic(
                     stage="词法分析",
-                    message=f"词法分析器异常: {e}",
+                    message=f"词法分析器异常: {e}{debug_info}",
                     code="E000",
                 )
             )
@@ -102,44 +102,42 @@ class Compiler:
                     result.errors.append(d)
             result.stages_completed.append("静态检查")
         except Exception as e:
+            debug_info = f"\n[编译器内部错误堆栈]\n{traceback.format_exc()}" if __debug__ else ""
             result.warnings.append(
                 CompileDiagnostic(
                     stage="静态检查",
-                    message=f"静态检查异常: {e}",
+                    message=f"静态检查异常: {e}{debug_info}",
                     severity=Severity.WARNING.value,
                     code="W000",
                 )
             )
 
-        # 3. 语法分析（表驱动 LL/LR，自动选法）
-        parse_result = None
+        # 3. 语法分析（带错误恢复）
         try:
             parse_result = Parser(result.tokens).parse()
             result.errors.extend(parse_result.errors)
             result.ast = parse_result.program
-            method_note = parse_result.parse_method or "auto"
-            result.stages_completed.append(f"语法分析({method_note})")
+            result.stages_completed.append("语法分析")
         except Exception as e:
+            debug_info = f"\n[编译器内部错误堆栈]\n{traceback.format_exc()}" if __debug__ else ""
             result.errors.append(
                 CompileDiagnostic(
                     stage="语法分析",
-                    message=f"语法分析器异常: {e}",
+                    message=f"语法分析器异常: {e}{debug_info}",
                     code="E200",
                 )
             )
 
-        if has_error_token or not result.ast or (
-            not result.ast.statements and not result.ast.functions
-        ):
-            if not result.ast or (not result.ast.statements and not result.ast.functions):
-                if not any(e.code.startswith("E") for e in result.errors if e.stage == "语法分析"):
-                    result.errors.append(
-                        CompileDiagnostic(
-                            stage="语法分析",
-                            message="未能生成有效的语法树，跳过后续阶段",
-                            code="E299",
-                        )
+        # 仅当AST完全无效时才跳过后续阶段
+        if not result.ast or (not result.ast.statements and not result.ast.functions):
+            if not any(e.code.startswith("E") for e in result.errors if e.stage == "语法分析"):
+                result.errors.append(
+                    CompileDiagnostic(
+                        stage="语法分析",
+                        message="未能生成有效的语法树，跳过后续阶段",
+                        code="E299",
                     )
+                )
             return self._finalize(result)
 
         # 4. 语义分析（收集全部语义错误）
@@ -150,15 +148,17 @@ class Compiler:
             result.symbol_table = sem.scope
             result.stages_completed.append("语义分析")
         except Exception as e:
+            debug_info = f"\n[编译器内部错误堆栈]\n{traceback.format_exc()}" if __debug__ else ""
             result.errors.append(
                 CompileDiagnostic(
                     stage="语义分析",
-                    message=f"语义分析异常: {e}",
+                    message=f"语义分析器异常: {e}{debug_info}",
                     code="E300",
                 )
             )
             return self._finalize(result)
 
+        # 存在任何错误时，跳过代码生成阶段
         if result.errors:
             return self._finalize(result)
 
@@ -167,10 +167,11 @@ class Compiler:
             result.tac = TACGenerator().generate(result.ast)
             result.stages_completed.append("中间代码")
         except Exception as e:
+            debug_info = f"\n[编译器内部错误堆栈]\n{traceback.format_exc()}" if __debug__ else ""
             result.errors.append(
                 CompileDiagnostic(
                     stage="中间代码",
-                    message=f"中间代码生成失败: {e}",
+                    message=f"中间代码生成失败: {e}{debug_info}",
                     code="E400",
                 )
             )
@@ -184,53 +185,63 @@ class Compiler:
                 tac = result.optimized_tac
                 result.stages_completed.append("优化")
             except Exception as e:
+                debug_info = f"\n[编译器内部错误堆栈]\n{traceback.format_exc()}" if __debug__ else ""
                 result.warnings.append(
                     CompileDiagnostic(
                         stage="优化",
-                        message=f"优化阶段失败，使用未优化代码: {e}",
+                        message=f"优化阶段失败，使用未优化代码: {e}{debug_info}",
                         severity=Severity.WARNING.value,
                         code="W400",
                     )
                 )
-                result.optimized_tac = tac
+                result.optimized_tac = None
 
         # 7. 目标代码
         try:
             result.target_code = CodeGenerator().generate(result.ast, tac)
             result.stages_completed.append("目标代码")
         except Exception as e:
+            debug_info = f"\n[编译器内部错误堆栈]\n{traceback.format_exc()}" if __debug__ else ""
             result.errors.append(
                 CompileDiagnostic(
                     stage="代码生成",
-                    message=f"目标代码生成失败: {e}",
+                    message=f"目标代码生成失败: {e}{debug_info}",
                     code="E500",
                 )
             )
             return self._finalize(result)
 
-        if run and result.target_code:
-            result.run_output = self._run_target(result.target_code)
-
+  
         return self._finalize(result)
 
-    def compile_file(self, path: Path, optimize: bool = True, run: bool = False, trace: bool = False) -> CompileResult:
+    def compile_file(self, path: Path, optimize: bool = True, run: bool = False) -> CompileResult:
         source = path.read_text(encoding="utf-8")
-        return self.compile(source, optimize=optimize, run=run, trace=trace)
+        return self.compile(source, optimize=optimize, run=run)
 
     @staticmethod
-    def _run_target(code: str, interactive: bool = True) -> str:
+    def _run_target(code: str) -> str:
         buf = io.StringIO()
-        old = sys.stdout
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
         sys.stdout = buf
-        globs = {"__name__": "__main__"}
+        sys.stderr = buf
+        
+        globs = {
+            "__name__": "__main__",
+            "__file__": "<generated>",
+            "__doc__": None,
+            "__package__": None,
+        }
         globs.update(runtime_globals())
+        
         try:
             exec(compile(code, "<generated>", "exec"), globs)
             return buf.getvalue()
         except Exception as e:
             return f"[运行错误] {type(e).__name__}: {e}\n{traceback.format_exc()}"
         finally:
-            sys.stdout = old
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
     @staticmethod
     def _finalize(result: CompileResult) -> CompileResult:

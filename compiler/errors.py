@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 class Severity(str, Enum):
@@ -29,15 +29,26 @@ class CompileDiagnostic:
     col: int = 0
     severity: str = Severity.ERROR.value
     code: str = ""
+    suggestion: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     def __str__(self) -> str:
-        loc = f"L{self.line}" + (f":C{self.col}" if self.col else "")
+        loc = ""
+        if self.line > 0:
+            # 列号为0时统一显示为第1列
+            show_col = self.col if self.col != 0 else 1
+            loc = f"第{self.line}行第{show_col}列"
+
         prefix = "警告" if self.severity == Severity.WARNING.value else "错误"
         code = f"[{self.code}] " if self.code else ""
-        return f"{prefix} [{self.stage}] {loc}: {code}{self.message}"
+
+        full_msg = f"{prefix} [{self.stage}] {loc}: {code}{self.message}"
+        if self.suggestion:
+            full_msg += f"\n  建议：{self.suggestion}"
+
+        return full_msg
 
 
 def diagnostic(
@@ -48,6 +59,7 @@ def diagnostic(
     col: int = 0,
     severity: Severity = Severity.ERROR,
     code: str = "",
+    suggestion: str = "",
 ) -> CompileDiagnostic:
     stage_val = stage.value if isinstance(stage, Stage) else stage
     return CompileDiagnostic(
@@ -57,4 +69,5 @@ def diagnostic(
         col=col,
         severity=severity.value,
         code=code,
+        suggestion=suggestion,
     )

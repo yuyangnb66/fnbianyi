@@ -1,16 +1,9 @@
-int sum(int a, int b) {
-    int c;
-    c = a + b;
-    return c;
-}
-int main() {int n;
-int x;
-input(n,x);
+int func(int x,int y){
+return x+y;}
+int main(){
 int c;
-c = sum (n,x);
+c=func(3,4);
 print(c);
-return 0;
-}
-
+return 0;}
 
 

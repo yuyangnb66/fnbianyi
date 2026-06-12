@@ -11,7 +11,7 @@
 | 阶段 | 模块 | 说明 |
 |------|------|------|
 | 词法分析 | `compiler/lexer.py` | 从 `grammar/tokens.json` 加载 Token 规则 |
-| 语法分析 | `compiler/parser.py` + `compiler/parsing/` | LL(1)/LR(0)/SLR(1)/LALR(1)/LR(1) 表驱动，自动选法 |
+| 语法分析 | `compiler/parser.py` | 递归下降，依据 `grammar/grammar.json` 的 BNF |
 | 语义分析 | `compiler/semantic.py` | 符号表、作用域、类型检查 |
 | 中间代码 | `compiler/tac.py` | 三地址码 (Three-Address Code) |
 | 优化 | `compiler/optimizer.py` | 常量折叠、复制传播、死代码消除 |
@@ -44,33 +44,7 @@ python -m compiler.main workspace/main.ml --dump all
 
 ## 语言特性
 
-`int` / `float` / `string`、数组（含 `string name[n]` 字符串数组）、函数（含递归）、`if` / `while` / `for`、`break` / `continue`、数组、`string[i]`（单字符串取字符）、`len()`、`input`、`print`（支持多参数同一行输出）、`printn`（不换行）、`write`。
-
-### 程序入口（类似 C 语言）
-
-顶层可声明全局变量，程序逻辑写在 `int main()` 中：
-
-```c
-int n;
-int sum;
-
-int max(int a, int b) {
-    if (a > b) {
-        return a;
-    } else {
-        return b;
-    }
-}
-
-int main() {
-    n = 10;
-    sum = max(n, 5);
-    print(sum);
-    return 0;
-}
-```
-
-顶层只能有**全局变量声明**和**函数定义**；若未写 `main`，仍兼容旧写法（顶层直接写语句，会提示 W315）。
+`int` / `float` / `string`、函数（含递归）、`if` / `while` / `for`、`break` / `continue`、数组、`string[i]`、`len()`、`input`、`print`（支持多参数同一行输出）、`printn`（不换行）、`write`。
 
 ### 一行读多个数（类似 `scanf`）
 
@@ -98,5 +72,5 @@ fnbianyi/
 | 参考项目 | 本项目 |
 |----------|--------|
 | Java DFA 词法分析 | Python 正则词法分析 + `tokens.json` |
-| Python LL1/LR 分析器 | 表驱动 LL(1)/LR 系 + `grammar.json` |
+| Python LL1/LR 分析器 | 递归下降 + `grammar.json` |
 | （无） | 语义分析、TAC、优化、代码生成 |

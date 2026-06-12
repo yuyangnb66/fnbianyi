@@ -1,5 +1,4 @@
 """MiniLang 运行时 — 支持交互输入与写文件，GUI/CLI 可注入回调。"""
-
 from __future__ import annotations
 
 import sys
@@ -26,11 +25,13 @@ def set_write_handler(fn: Callable[[Path, str], None]) -> None:
 
 
 def set_warn_handler(fn: Callable[[str], None]) -> None:
+    """设置运行时警告处理器，IDE可注入回调将警告显示到错误面板"""
     global _warn_fn
     _warn_fn = fn
 
 
 def reset_handlers() -> None:
+    """重置所有运行时回调处理器"""
     global _input_fn, _on_write_fn, _warn_fn
     _input_fn = None
     _on_write_fn = None
@@ -38,11 +39,16 @@ def reset_handlers() -> None:
 
 
 def ensure_dirs() -> None:
+    """确保工作目录和输出目录存在"""
     WORKSPACE.mkdir(exist_ok=True)
     OUTPUT_DIR.mkdir(exist_ok=True)
 
 
 def ml_input(prompt: str = "") -> str:
+    """
+    基础输入函数：接收提示语，返回用户输入的原始字符串
+    对应 MiniLang 语法：input(var) / input(var, "提示")
+    """
     if _input_fn:
         return _input_fn(prompt)
     if prompt:
@@ -52,10 +58,19 @@ def ml_input(prompt: str = "") -> str:
 
 
 def ml_split_line(raw: str) -> list[str]:
+    """
+    将输入行按空格分割为token列表
+    用于批量输入和getint函数的字符串解析
+    """
     return raw.split()
 
 
 def ml_warn(message: str) -> None:
+    """
+    运行时警告输出函数
+    - 有GUI注入时调用_warn_fn显示到错误面板
+    - 无GUI时输出到stderr
+    """
     text = f"[运行警告] {message}"
     if _warn_fn:
         _warn_fn(text)
@@ -65,7 +80,11 @@ def ml_warn(message: str) -> None:
 
 
 def ml_check_token_count(raw: str, expected: int, context: str = "") -> None:
-    """个数不匹配时发出运行警告，不中断程序。"""
+    """
+    检查输入行的token个数是否符合预期
+    个数不匹配时发出运行警告，不中断程序
+    对应语义分析器E331-E333的运行时补充校验
+    """
     if expected < 0:
         return
     actual = len(ml_split_line(str(raw).strip()))
@@ -83,6 +102,11 @@ def ml_check_token_count(raw: str, expected: int, context: str = "") -> None:
 
 
 def ml_getint(line: str, index: int) -> int:
+    """
+    从字符串中提取指定位置的整数
+    对应 MiniLang 内置函数：getint(line, index)
+    索引从0开始，超出范围或解析失败返回0
+    """
     parts = ml_split_line(line.strip())
     if index < 0 or index >= len(parts):
         return 0
@@ -96,13 +120,22 @@ def ml_getint(line: str, index: int) -> int:
 
 
 def ml_getint_line(line: str, index: int, expected: int) -> int:
-    """getint 带期望个数：在 index==0 时自动校验本行 token 个数并警告。"""
+    """
+    getint的增强版：带输入个数校验
+    当index==0时自动校验本行token总数并发出警告
+    对应语义分析器对getint参数的静态校验补充
+    """
     if index == 0 and expected >= 0:
         ml_check_token_count(line, expected, "行数据")
     return ml_getint(line, index)
 
 
 def ml_write(path: str, content: str) -> None:
+    """
+    写文件函数
+    对应 MiniLang 语法：write(path, content)
+    相对路径自动映射到OUTPUT_DIR
+    """
     ensure_dirs()
     p = Path(path)
     if not p.is_absolute():
@@ -114,7 +147,11 @@ def ml_write(path: str, content: str) -> None:
 
 
 def runtime_globals() -> dict:
-    """注入到 exec 的命名空间。"""
+    """
+    注入到exec执行环境的全局命名空间
+    所有MiniLang内置函数都在这里导出
+    与codegen.py生成的目标代码完全对应
+    """
     return {
         "_ml_input": ml_input,
         "_ml_write": ml_write,

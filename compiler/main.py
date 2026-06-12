@@ -29,7 +29,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", action="store_true", help="编译并运行")
     parser.add_argument("--gui", action="store_true", help="启动桌面代码编辑器")
     parser.add_argument("--no-opt", action="store_true", help="跳过优化阶段")
-    parser.add_argument("--trace", action="store_true", help="打印词法器 NFA/DFA 调试信息")
     parser.add_argument(
         "--dump",
         choices=["tokens", "ast", "tac", "opt", "all"],
@@ -48,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     compiler = Compiler()
-    result = compiler.compile_file(src_path, optimize=not args.no_opt, run=args.run, trace=args.trace)
+    result = compiler.compile_file(src_path, optimize=not args.no_opt, run=args.run)
 
     if not result.success:
         print("编译失败:", file=sys.stderr)
@@ -77,16 +76,14 @@ def main(argv: list[str] | None = None) -> int:
 
     out_path = Path(args.output) if args.output else src_path.with_suffix(".py")
     out_path.write_text(result.target_code, encoding="utf-8")
-    print(f"编译成功 → {out_path}")
 
     if args.run:
-        print("\n--- 程序输出 ---")
+        print("编译成功，程序输出：\n")
         globs = {"__name__": "__main__"}
         globs.update(runtime_globals())
         exec(compile(result.target_code, str(out_path), "exec"), globs)
 
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
