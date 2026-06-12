@@ -1,48 +1,5 @@
-"""语义分析 — 符号表、类型检查、函数与数组支持。
+# 语义分析 — 符号表、类型检查、函数与数组支持。
 
-语义分析错误统一 E3xx
-E301: 变量重复定义
-E302: 使用未声明的变量
-E303: 赋值语句左右两侧类型不兼容
-E304: 条件表达式类型不符合要求
-E305: 一元负号运算符作用于非数值类型
-E306: 编译阶段检测到除零运算
-E307: 算术运算符操作数非数值类型
-E308: 关系运算符操作数非数值类型
-E309: 函数重复定义
-E310: 函数参数列表存在重复参数名
-E311: 数组声明大小不是正整数
-E312: string 类型不支持数组形式声明
-E313: 对非数组变量使用下标访问
-E314: 数组元素赋值类型不匹配
-E315: return 语句出现在函数外部
-E316: 函数返回值类型与定义类型不匹配
-E317: 非void函数缺少return返回表达式
-E318: break 语句出现在循环外部
-E319: continue 语句出现在循环外部
-E320: 调用未定义的自定义函数
-E321: 函数调用参数数量与定义不匹配
-E322: 函数调用参数类型与定义不匹配
-E323: 数组类型变量未使用下标直接引用
-E324: 字符串类型使用算术运算符运算
-E325: 字符串使用非法关系运算符（仅支持 ==、!=）
-E326: input 语句目标变量未声明
-E327: write 语句文件路径参数非 string 类型
-E328: 内置函数 len() 传入参数数量错误
-E329: 内置函数 len() 不能传入数组下标访问表达式
-E330: 内置函数 len() 仅支持 string 类型或数组变量
-E331: 内置函数 getint() 传入参数数量错误
-E332: 内置函数 getint() 第一个参数非 string 类型
-E333: 内置函数 getint() 第二个参数非数值类型
-
-语义分析警告统一 W3xx
-W301: if 语句分支代码块为空
-W302: 变量已声明但全程未使用
-W303: 非void类型函数可能缺少 return 语句
-W304: 逻辑运算左操作数类型非常规数值/逻辑类型
-W305: 逻辑运算右操作数类型非常规数值/逻辑类型
-W306: 定义但从未被调用的自定义函数
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -144,10 +101,9 @@ class SemanticResult:
 class SemanticAnalyzer:
     # 类型系统：数值内部兼容，bool与数值严格不互通
     NUMERIC = {"int", "float"}
-    LOGIC = {"int"}
-    RET_NEVER = 0
-    RET_MAYBE = 1
-    RET_ALWAYS = 2
+    BOOL = {"bool"}
+    # 逻辑运算允许的操作数类型
+    LOGICAL_ALLOWED = {"int", "float", "bool"}
 
     def __init__(self):
         self.global_scope = Scope()
@@ -156,28 +112,21 @@ class SemanticAnalyzer:
         self.current_function: Optional[FuncSymbol] = None
         self.errors: List[CompileDiagnostic] = []
         self.warnings: List[CompileDiagnostic] = []
-        self.loop_depth = 0
-        self.called_functions: Set[str] = set()
+
+        # 上下文栈：支持loop/function等嵌套结构
+        self.context_stack: List[str] = []
+        self.has_return = False
+        self.all_path_return = True
+
+        # 去重：记录已报错的未声明变量，避免重复弹窗
+        self.undeclared_reported: Set[str] = set()
 
     def analyze(self, program: Program) -> SemanticResult:
-        main_fns = [fn for fn in program.functions if fn.name == "main"]
-        if len(main_fns) > 1:
-            self._err("main 函数重复定义", main_fns[1].line, "E341")
-        main_fn = main_fns[0] if main_fns else None
-        for stmt in program.statements:
-            if isinstance(stmt, DeclStmt):
-                self._analyze_stmt(stmt)
         for fn in program.functions:
-            if fn.name != "main":
-                self._analyze_function(fn)
-        if main_fn:
-            self._analyze_main(main_fn)
-        self._check_entry_point(program, main_fn)
-        if not main_fn:
-            for stmt in program.statements:
-                if not isinstance(stmt, DeclStmt):
-                    self._analyze_stmt(stmt)
-        self._check_uncalled_functions()
+            self._analyze_function(fn)
+        for stmt in program.statements:
+            self._analyze_stmt(stmt)
+        # 全局作用域未使用变量检测
         self._check_unused_globals()
         return SemanticResult(
             scope=self.global_scope,
@@ -186,46 +135,8 @@ class SemanticAnalyzer:
             warnings=list(self.warnings),
         )
 
-    def _check_entry_point(self, program: Program, main_fn: Optional[FuncDecl]) -> None:
-        exec_stmts = [s for s in program.statements if not isinstance(s, DeclStmt)]
-        if main_fn:
-            if exec_stmts:
-                line = exec_stmts[0].line
-                self._err(
-                    "程序入口代码应写在 int main() { ... } 内，顶层只能声明全局变量",
-                    line,
-                    "E339",
-                )
-            return
-        if exec_stmts:
-            self._warn(
-                "建议使用 int main() { ... } 作为程序入口（类似 C 语言）",
-                exec_stmts[0].line,
-                "W315",
-            )
-        elif not program.statements and not program.functions:
-            self._err("源程序为空", 0, "E340")
-        elif not exec_stmts and not main_fn:
-            self._err("缺少程序入口，请定义 int main() { ... }", 0, "E340")
-
-    def _analyze_main(self, fn: FuncDecl) -> None:
-        if fn.return_type != "int":
-            self._err("main 函数必须声明为 int main()", fn.line, code="E337")
-        if fn.params:
-            self._err("main 函数不接受参数，请使用 int main()", fn.line, code="E338")
-        self._analyze_function(fn, is_main=True)
-
-    def _err(
-        self,
-        message: str,
-        line: int = 0,
-        col: int | str = 0,
-        code: str = "E300",
-        suggestion: str = "",
-    ) -> None:
-        if isinstance(col, str):
-            code = col
-            col = 0
+    # 错误/警告统一接口
+    def _err(self, message: str, line: int, col: int, code: str = "E300", suggestion: str = "") -> None:
         self.errors.append(
             diagnostic(
                 Stage.SEMANTIC,
@@ -233,14 +144,11 @@ class SemanticAnalyzer:
                 line=line,
                 col=col,
                 code=code,
-                suggestion=suggestion,
+                suggestion=suggestion
             )
         )
 
-    def _warn(self, message: str, line: int = 0, col: int | str = 0, code: str = "W300", suggestion: str = "") -> None:
-        if isinstance(col, str):
-            code = col
-            col = 0
+    def _warn(self, message: str, line: int, col: int, code: str = "W300", suggestion: str = "") -> None:
         self.warnings.append(
             diagnostic(
                 Stage.SEMANTIC,
@@ -253,7 +161,7 @@ class SemanticAnalyzer:
             )
         )
 
-    def _analyze_function(self, fn: FuncDecl, is_main: bool = False) -> None:
+    def _analyze_function(self, fn: FuncDecl) -> None:
         if fn.name in self.functions:
             self._err(
                 f"函数 '{fn.name}' 重复定义",
@@ -278,6 +186,13 @@ class SemanticAnalyzer:
         fs = FuncSymbol(fn.name, fn.return_type, list(fn.params), fn.line, fn.col)
         self.functions[fn.name] = fs
         self.current_function = fs
+
+        # 重置返回标记
+        self.has_return = False
+        self.all_path_return = True
+        # 函数入栈上下文
+        self.context_stack.append("function")
+
         self._push_scope()
         # 注册函数形参
         param_sym_list: List[Symbol] = []
@@ -287,21 +202,45 @@ class SemanticAnalyzer:
             dup = self.current_scope.define(sym)
             if dup:
                 self.errors.append(dup)
-        self._analyze_stmt_list(fn.body.statements)
-        ret_state = self._block_return_state(fn.body)
-        if fn.return_type != "void":
-            if ret_state == self.RET_NEVER:
-                if is_main:
-                    self._warn("main 函数缺少 return，将默认返回 0", fn.line, "W316")
-                else:
-                    self._err(f"函数 '{fn.name}' 缺少 return 语句", fn.line, "E335")
-            elif ret_state == self.RET_MAYBE and not is_main:
-                self._warn(
-                    f"函数 '{fn.name}' 存在未覆盖 return 的分支（如 if 缺少 else）",
-                    fn.line,
-                    "W313",
-                )
+
+        # 分析函数体语句
+        for stmt in fn.body.statements:
+            self._analyze_stmt(stmt)
+
         self._pop_scope()
+        # 函数出栈上下文
+        self.context_stack.pop()
+
+        # 函数形参未使用警告
+        for param_sym in param_sym_list:
+            if not param_sym.used:
+                self._warn(
+                    f"函数 '{fn.name}' 形参 '{param_sym.name}' 已声明但未使用",
+                    param_sym.declared_line,
+                    param_sym.declared_col,
+                    "W302",
+                    "删除无用参数，或补充参数使用逻辑"
+                )
+
+        # 非void函数全路径Return校验
+        if fn.return_type != "void":
+            if not self.has_return:
+                self._warn(
+                    f"非void类型函数 '{fn.name}' 缺少 return 语句",
+                    fn.line,
+                    fn.col,
+                    "W303",
+                    "为该函数补充 return 返回语句"
+                )
+            elif not self.all_path_return:
+                self._warn(
+                    f"非void类型函数 '{fn.name}' 存在部分执行路径缺少 return 语句",
+                    fn.line,
+                    fn.col,
+                    "W303",
+                    "保证函数所有分支都包含 return 语句"
+                )
+
         self.current_function = None
 
     # 进入新作用域（代码块/函数）
@@ -344,7 +283,21 @@ class SemanticAnalyzer:
                 array_size=stmt.array_size or 0,
             )
             if stmt.array_size is not None and stmt.array_size <= 0:
-                self._err(f"数组 '{stmt.name}' 大小必须为正整数", stmt.line, "E312")
+                self._err(
+                    f"数组 '{stmt.name}' 大小不是正整数",
+                    stmt.line,
+                    stmt.col,
+                    "E311",
+                    "将数组大小设置为大于0的整数"
+                )
+            if stmt.type_name == "string" and stmt.array_size:
+                self._err(
+                    "string 类型不支持数组形式声明",
+                    stmt.line,
+                    stmt.col,
+                    "E312",
+                    "取消string类型的数组定义，或更换数据类型"
+                )
             dup = self.current_scope.define(sym)
             if dup:
                 self.errors.append(dup)
@@ -411,76 +364,110 @@ class SemanticAnalyzer:
                     )
 
         elif isinstance(stmt, IfStmt):
-            self._check_condition(stmt.condition, stmt.line)
+            cond_type = self._check_expr(stmt.condition)
+            if cond_type is None:
+                return
+            # 条件表达式布尔校验 
+            self._check_condition(stmt.condition)
+
             if not stmt.then_block.statements:
                 self._warn(
                     "if 语句分支代码块为空",
                     stmt.line,
                     stmt.col,
                     "W301",
-                    "为空代码块补充逻辑，或删除多余的if结构",
+                    "为空代码块补充逻辑，或删除多余的if结构"
                 )
+            # 分支路径判断
+            old_all_return = self.all_path_return
             self._analyze_block(stmt.then_block)
-            for elif_cond, elif_block in stmt.elif_blocks:
-                self._check_condition(elif_cond, stmt.line)
-                self._analyze_block(elif_block)
+            then_has_ret = self.has_return
+
             if stmt.else_block:
+                self.all_path_return = old_all_return
                 self._analyze_block(stmt.else_block)
+                else_has_ret = self.has_return
+                # 双分支：仅当两个分支都有return，才算全路径返回
+                self.all_path_return = then_has_ret and else_has_ret
+            else:
+                self.all_path_return = False
 
         elif isinstance(stmt, WhileStmt):
-            self._check_condition(stmt.condition, stmt.line)
-            self.loop_depth += 1
+            cond_type = self._check_expr(stmt.condition)
+            if cond_type is None:
+                return
+            # while条件表达式布尔校验
+            self._check_condition(stmt.condition)
+            # 上下文栈标记循环
+            self.context_stack.append("loop")
             self._analyze_block(stmt.body)
-            self.loop_depth -= 1
+            self.context_stack.pop()
 
         elif isinstance(stmt, ForStmt):
             if stmt.init:
                 self._analyze_stmt(stmt.init)
-            self._check_condition(stmt.condition, stmt.line)
-            self.loop_depth += 1
+            cond_type = self._check_expr(stmt.condition)
+            if cond_type is None:
+                return
+            # for条件表达式布尔校验
+            self._check_condition(stmt.condition)
+            # 上下文栈标记循环
+            self.context_stack.append("loop")
             self._analyze_block(stmt.body)
-            self.loop_depth -= 1
+            self.context_stack.pop()
             if stmt.update:
                 self._analyze_stmt(stmt.update)
 
         elif isinstance(stmt, ReturnStmt):
             if not self.current_function:
-                self._err("return 只能出现在函数内部", stmt.line, "E316")
-            else:
-                if stmt.value:
-                    if self.current_function.return_type == "void":
-                        self._err("void 函数不能使用 return 表达式", stmt.line, "E336")
-                    else:
-                        rt = self._check_expr(stmt.value, stmt.line)
-                        if rt != "unknown" and not self._compatible(
-                            self.current_function.return_type, rt
-                        ):
-                            self._err(
-                                f"返回值类型 {rt} 与函数返回类型 "
-                                f"{self.current_function.return_type} 不匹配",
-                                stmt.line,
-                                "E317",
-                            )
-                elif self.current_function.return_type != "void":
-                    self._err("非 void 函数 return 必须带返回值", stmt.line, "E318")
+                self._err(
+                    "return 语句出现在函数外部",
+                    stmt.line,
+                    stmt.col,
+                    "E315",
+                    "删除函数外的return语句，或将其移入函数中"
+                )
+                return
+            self.has_return = True
+            if stmt.value:
+                rt = self._check_expr(stmt.value)
+                if rt is None:
+                    return
+                if rt != "unknown" and not self._compatible(self.current_function.return_type, rt):
+                    self._err(
+                        f"返回值类型 {rt} 与函数返回类型 {self.current_function.return_type} 不匹配",
+                        stmt.line,
+                        stmt.col,
+                        "E316",
+                        "修改返回值类型，与函数定义保持一致"
+                    )
+            elif self.current_function.return_type != "void":
+                self._err(
+                    "非void函数缺少return返回表达式",
+                    stmt.line,
+                    stmt.col,
+                    "E317",
+                    "为return语句补充返回值"
+                )
+
         elif isinstance(stmt, BreakStmt):
-            if self.loop_depth == 0:
+            if "loop" not in self.context_stack:
                 self._err(
                     "break 语句出现在循环外部",
                     stmt.line,
                     stmt.col,
                     "E318",
-                    "删除循环外的break语句，或将其移入循环中",
+                    "删除循环外的break语句，或将其移入循环中"
                 )
 
         elif isinstance(stmt, ContinueStmt):
-            if self.loop_depth == 0:
+            if "loop" not in self.context_stack:
                 self._err(
                     "continue 语句出现在循环外部",
                     stmt.line,
                     stmt.col,
                     "E319",
-                    "删除循环外的continue语句，或将其移入循环中",
+                    "删除循环外的continue语句，或将其移入循环中"
                 )
 
         elif isinstance(stmt, PrintStmt):
@@ -530,81 +517,46 @@ class SemanticAnalyzer:
         elif isinstance(stmt, Block):
             self._analyze_block(stmt)
 
-    def _analyze_stmt_list(self, statements: List[Stmt]) -> None:
-        seen_return = False
-        for s in statements:
-            if seen_return:
-                self._warn("return 之后的语句不可达", s.line, "W314")
-            self._analyze_stmt(s)
-            if isinstance(s, ReturnStmt):
-                seen_return = True
+        elif isinstance(stmt, ExprStmt):
+            e_type = self._check_expr(stmt.expr)
+            if e_type is None:
+                return
+            if isinstance(stmt.expr, CallExpr):
+                call_fn = self.functions.get(stmt.expr.name)
+                if call_fn and call_fn.return_type != "void":
+                    self._warn(
+                        f"函数 '{stmt.expr.name}' 的返回值未被使用",
+                        stmt.line,
+                        stmt.col,
+                        "W302",
+                        "接收函数返回值，或改用void类型函数"
+                    )
 
+    # 分析代码块，自动管理作用域
     def _analyze_block(self, block: Block) -> None:
         self._push_scope()
-        self._analyze_stmt_list(block.statements)
+        for s in block.statements:
+            self._analyze_stmt(s)
         self._pop_scope()
 
-    def _block_return_state(self, block: Block) -> int:
-        state = self.RET_NEVER
-        for stmt in block.statements:
-            if isinstance(stmt, ReturnStmt):
-                return self.RET_ALWAYS
-            rs = self._stmt_return_state(stmt)
-            if rs == self.RET_ALWAYS:
-                return self.RET_ALWAYS
-            if rs == self.RET_MAYBE:
-                state = self.RET_MAYBE
-        return state
 
-    def _stmt_return_state(self, stmt: Stmt) -> int:
-        if isinstance(stmt, ReturnStmt):
-            return self.RET_ALWAYS
-        if isinstance(stmt, IfStmt):
-            then_s = self._block_return_state(stmt.then_block)
-            if stmt.else_block:
-                else_s = self._block_return_state(stmt.else_block)
-                if then_s == self.RET_ALWAYS and else_s == self.RET_ALWAYS:
-                    return self.RET_ALWAYS
-                if then_s != self.RET_NEVER or else_s != self.RET_NEVER:
-                    return self.RET_MAYBE
-                return self.RET_NEVER
-            if then_s == self.RET_ALWAYS:
-                return self.RET_MAYBE
-            return then_s
-        if isinstance(stmt, (WhileStmt, ForStmt)):
-            body_s = self._block_return_state(stmt.body)
-            if body_s != self.RET_NEVER:
-                return self.RET_MAYBE
-            return self.RET_NEVER
-        if isinstance(stmt, Block):
-            return self._block_return_state(stmt)
-        return self.RET_NEVER
-
-    def _check_condition(self, expr: Expr, line: int = 0) -> None:
-        t = self._check_expr(expr, line or getattr(expr, "line", 0))
-        if t is None:
+    def _check_condition(self, expr: Expr) -> None:
+        t = self._check_expr(expr)
+        if t is None or t == "unknown":
             return
-        if isinstance(expr, RelExpr):
-            return
-        if isinstance(expr, BinaryExpr) and expr.op in ("&&", "||"):
-            return
-        if t in self.NUMERIC or t in self.LOGIC:
-            return
-        if t != "unknown":
+        if t not in self.BOOL:
             self._err(
                 "条件表达式类型不符合要求",
-                getattr(expr, "line", line),
-                getattr(expr, "col", 0),
+                expr.line,
+                expr.col,
                 "E304",
-                "条件表达式请使用关系运算、逻辑运算生成布尔值",
+                "条件表达式请使用关系运算、逻辑运算生成布尔值"
             )
 
     # 递归检查表达式类型
-    def _check_expr(self, expr: Expr, default_line: int = 0) -> Optional[str]:
+    def _check_expr(self, expr: Expr) -> Optional[str]:
         if expr is None:
             return None
-        line = getattr(expr, "line", 0) or default_line
-        col = getattr(expr, "col", 0)
 
         if isinstance(expr, IntLit):
             return "int"
@@ -624,19 +576,27 @@ class SemanticAnalyzer:
                         "按照规则传入1个参数给len函数"
                     )
                     return "int"
-                arg0 = expr.args[0]
-                if isinstance(arg0, ArrayAccessExpr):
-                    self._err("len 的参数应为变量名", line, col, "E330")
-                elif isinstance(arg0, VarExpr):
-                    sym = self.current_scope.lookup(arg0.name)
-                    if not sym:
-                        self._err(f"未声明的变量 '{arg0.name}'", line, col, "E303")
-                    elif not sym.is_array and sym.type_name != "string":
-                        self._err("len 仅支持 string 或数组", line, col, "E331")
-                    elif sym:
-                        sym.used = True
-                else:
-                    self._check_expr(arg0, default_line)
+                arg_type = self._check_expr(expr.args[0])
+                if arg_type is None:
+                    return None
+                if isinstance(expr.args[0], ArrayAccessExpr):
+                    self._err(
+                        "内置函数 len() 不能传入数组下标访问表达式",
+                        expr.line,
+                        expr.col,
+                        "E329",
+                        "len 的参数应为变量名"
+                    )
+                elif isinstance(expr.args[0], VarExpr):
+                    sym = self.current_scope.lookup(expr.args[0].name)
+                    if sym and not sym.is_array and sym.type_name != "string":
+                        self._err(
+                            "内置函数 len() 不能传入数组下标访问表达式",
+                            expr.line,
+                            expr.col,
+                            "E330",
+                            "len 仅支持 string 或数组"
+                        )
                 expr.type_name = "int"
                 return "int"
 
@@ -689,7 +649,6 @@ class SemanticAnalyzer:
                     )
                     self.undeclared_reported.add(expr.name)
                 return "unknown"
-            self.called_functions.add(expr.name)
             if len(expr.args) != len(fn.params):
                 self._err(
                     f"函数 '{expr.name}' 期望 {len(fn.params)} 个参数，实际 {len(expr.args)} 个",
@@ -933,20 +892,6 @@ class SemanticAnalyzer:
             return "bool"
 
         return "unknown"
-
-    # 检测定义但从未被调用的函数
-    def _check_uncalled_functions(self) -> None:
-        for name, fs in self.functions.items():
-            if name == "main":
-                continue
-            if name not in self.called_functions:
-                self._warn(
-                    f"函数 '{name}' 已定义但从未被调用",
-                    fs.line,
-                    fs.col,
-                    "W306",
-                    "删除无用函数，或补充调用逻辑"
-                )
 
     # 检测全局作用域未使用的变量
     def _check_unused_globals(self) -> None:
