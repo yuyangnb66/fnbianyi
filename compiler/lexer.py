@@ -1,13 +1,13 @@
-from __future__ import annotations
+# 词法分析器 — 将源代码转换为 Token 序列，基于 DFA/NFA 实现最长匹配与优先级解析。"""
 
+from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, List, Optional, Tuple, Dict, Set, Union
 
-from .errors import CompileDiagnostic, Stage, diagnostic
-
+from .errors import CompileDiagnostic, Severity, Stage, diagnostic
 
 @dataclass
 class Token:
@@ -31,10 +31,13 @@ class LexerError(Exception):
 class LexResult:
     tokens: List[Token] = field(default_factory=list)
     errors: List[CompileDiagnostic] = field(default_factory=list)
+    warnings: List[CompileDiagnostic] = field(default_factory=list)
 
 
 class Lexer:
-    MAX_ERRORS = 50
+    MAX_ERRORS = 100
+    MAX_WARNINGS = 100
+    MAX_TOKEN_LEN = 2000
 
     def __init__(self, source: str, rules_path: Optional[Path] = None, trace: bool = False):
         self.source = source
@@ -42,44 +45,57 @@ class Lexer:
         self.line = 1
         self.col = 1
         self.errors: List[CompileDiagnostic] = []
+        self.warnings: List[CompileDiagnostic] = []
         rules_path = rules_path or Path(__file__).parent.parent / "grammar" / "tokens.json"
         self.rules = self._load_rules(rules_path)
         self.charsets = self.rules.get("charsets", {})
         self.trace = trace
 
-        # 存储每个pattern对应的DFA及其元数据(优先级越高数字越小)
+        self.float_dfa = None
+        self.int_dfa = None
         self.pattern_dfas: List[Tuple[DFA, str, bool, int]] = []
+        self.first_char_map: Dict[str, List[Tuple[DFA, str, bool, int]]] = {}
+        self.safe_patterns: List[Tuple[DFA, str, bool, int]] = []
 
-        # 为每个pattern生成DFA
         for priority, spec in enumerate(self.rules["patterns"]):
             name = spec["name"]
             regex = spec["regex"]
             skip = spec.get("skip", False)
 
-            # 展开字符集引用 - 关键改进：不再展开为|链，而是保留字符集标记
             processed_regex = self._process_charsets(regex)
-
             self._trace(f"[PROCESSED] {name}: {regex} -> {processed_regex}")
 
-            # 生成NFA
             parser = RegexParser(processed_regex, self.charsets)
             nfa = parser.to_nfa()
-
-            # 转换为DFA
             dfa = RegexParser.nfa_to_dfa(nfa)
 
-            # 标记DFA的接受状态对应的token类型和优先级
             for state in dfa.states:
                 if nfa.accept in state.nfa_states:
                     state.is_accept = True
                     state.token_type = name
                     state.priority = priority
 
-            self.pattern_dfas.append((dfa, name, skip, priority)) 
-            # AAAAAAA
+            dfa_entry = (dfa, name, skip, priority)
+            self.pattern_dfas.append(dfa_entry)
+
+            # 区分数字DFA
+            if name == "FLOAT_LIT":
+                self.float_dfa = dfa_entry
+            elif name == "INT_LIT":
+                self.int_dfa = dfa_entry
+            elif name not in ("FLOAT_LIT", "INT_LIT"):
+                self.safe_patterns.append(dfa_entry)
+
             self._trace(f"[COMPILED] Pattern '{name}' -> DFA with {len(dfa.states)} states")
 
-        # 预排序操作符和关键字（最长匹配优先）
+        # 构建首字符映射
+        for dfa, name, skip, priority in self.pattern_dfas:
+            if dfa.start and dfa.start.transitions:
+                for char in dfa.start.transitions.keys():
+                    if char not in self.first_char_map:
+                        self.first_char_map[char] = []
+                    self.first_char_map[char].append((dfa, name, skip, priority))
+
         self.operators = sorted(
             self.rules.get("operators", {}).items(),
             key=lambda x: -len(x[0])
@@ -95,24 +111,30 @@ class Lexer:
             raise FileNotFoundError(f"词法规则文件不存在: {path}")
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-        
-    # AAAAAAAA
+
     def _trace(self, msg: str) -> None:
         if self.trace:
             print(msg)
-        
+
     def _process_charsets(self, pattern: str) -> str:
-        for name in sorted(self.charsets.keys(), key=len, reverse=True):
-            pattern = re.sub(
-                rf"(?<![a-zA-Z0-9_]){re.escape(name)}(?![a-zA-Z0-9_])",
-                f"{{{{{name}}}}}",
-                pattern,
-            )
-        return pattern
-
+        # 按长度降序排列，确保较长的名称（如 nonl_blank）优先于较短的名称（如 blank）被匹配
+        sorted_names = sorted(self.charsets.keys(), key=len, reverse=True)
+    
+        pattern_regex = '|'.join(re.escape(name) for name in sorted_names)
+        
+        # 定义替换回调函数
+        def replace_match(match):
+            matched_name = match.group(0)
+            # 将匹配到的独立名称包裹上 {{}}
+            return f"{{{{{matched_name}}}}}"
+        
+        return re.sub(r'\b(' + pattern_regex + r')\b', replace_match, pattern)
+    
+    
     def _current(self) -> str:
-        return self.source[self.pos : self.pos + 1] if self.pos < len(self.source) else ""
+        return self.source[self.pos: self.pos + 1] if self.pos < len(self.source) else ""
 
+    # 统一字符前进逻辑：所有场景必须调用，保证游标稳定
     def _advance(self, n: int = 1) -> None:
         for _ in range(n):
             if self.pos < len(self.source) and self.source[self.pos] == "\n":
@@ -122,174 +144,259 @@ class Lexer:
                 self.col += 1
             self.pos += 1
 
-    def _add_error(self, message: str, line: int, col: int, code: str = "E001") -> None:
+    # 错误收集接口
+    def _add_error(self, message: str, line: int, col: int, code: str = "E101", suggestion: Optional[str] = None) -> None:
         if len(self.errors) >= self.MAX_ERRORS:
             return
         self.errors.append(
-            diagnostic(Stage.LEXER, message, line=line, col=col, code=code)
+            diagnostic(Stage.LEXER, message, line=line, col=col, code=code, suggestion=suggestion or "")
+        )
+
+    # 警告收集接口
+    def _add_warn(self, message: str, line: int, col: int, code: str = "W100", suggestion: Optional[str] = None) -> None:
+        if len(self.warnings) >= self.MAX_WARNINGS:
+            return
+        self.warnings.append(
+            diagnostic(Stage.LEXER, message, line=line, col=col, code=code, severity=Severity.WARNING, suggestion=suggestion or "")
         )
 
     def _validate_number(self, text: str, line: int, col: int) -> bool:
         if text.count(".") > 1:
-            self._add_error(f"非法数字格式 '{text}'（多个小数点）", line, col, "E003")
+            self._add_error(
+                f"非法数字 '{text}'：包含多个小数点",
+                line, col, "E102",
+                "检查是否误写为小数或表达式"
+            )
             return False
+
         if text.endswith("."):
-            self._add_error(f"非法数字格式 '{text}'（小数点后缺少数字）", line, col, "E004")
+            self._add_error(
+                f"非法数字 '{text}'：小数点后缺少数字",
+                line, col, "E103",
+                "补充小数部分"
+            )
             return False
+
         try:
             float(text)
         except ValueError:
-            self._add_error(f"非法数字格式 '{text}'", line, col, "E005")
+            self._add_error(
+                f"数字格式 '{text}'非法",
+                line, col, "E104",
+                "检查是否混入非法字符（如 12a、1..2）"
+            )
             return False
+
         return True
 
-    @staticmethod
-    def _decode_string(text: str) -> str:
-        inner = text[1:-1]
-        return (
-            inner.replace("\\n", "\n")
-            .replace("\\t", "\t")
-            .replace('\\"', '"')
-            .replace("\\\\", "\\")
-        )
-
-    def _match_dfa(self, dfa: DFA) -> Optional[str]:
-        """使用给定的DFA从当前位置进行匹配，返回最长匹配的字符串"""
+    def _match_dfa(self, dfa: DFA, start_pos: int, max_len: int = None) -> Tuple[Optional[str], int]:
+        if max_len is None:
+            max_len = self.MAX_TOKEN_LEN
         current_state = dfa.start
         last_accept_pos = -1
-        current_pos = self.pos
+        total_len = len(self.source)
+        current_idx = start_pos
 
-        while current_pos < len(self.source):
-            char = self.source[current_pos]
-            
-            # 检查当前状态是否有该字符的转移
-            if char in current_state.transitions:
-                current_state = current_state.transitions[char]
-                current_pos += 1
-                
-                # 如果当前状态是接受状态，记录位置
-                if current_state.is_accept:
-                    last_accept_pos = current_pos
-            else:
+        while current_idx < total_len and (current_idx - start_pos) < max_len:
+            char = self.source[current_idx]
+            if char not in current_state.transitions:
                 break
+            current_state = current_state.transitions[char]
+            current_idx += 1
+            if current_state.is_accept:
+                last_accept_pos = current_idx
 
-        # 如果有接受状态，返回匹配的字符串
-        if last_accept_pos != -1:
-            return self.source[self.pos:last_accept_pos]
-        return None
+        if (current_idx - start_pos) >= self.MAX_TOKEN_LEN and last_accept_pos != -1:
+            self._add_warn(
+                f"Token 长度超出最大限制({self.MAX_TOKEN_LEN})",
+                self.line, self.col, "E110",
+                "请缩短标识符/字面量长度"
+            )
+
+        if last_accept_pos == -1:
+            return None, 0
+        match_str = self.source[start_pos:last_accept_pos]
+        return match_str, last_accept_pos - start_pos
 
     def next_token(self) -> Optional[Token]:
-        while self.pos < len(self.source):
+        source_total = len(self.source)
+        if self.pos > source_total * 2:
+            self._add_error(
+                "词法分析器游标异常，检测到无限循环，强制终止",
+                self.line, self.col, "E100",
+                "请检查源码是否有语法错误导致词法分析器卡死"
+            )
+            return None
+
+        while self.pos < source_total:
             start_line, start_col = self.line, self.col
+            current_char = self._current()
+            self._trace(f"\n[POS] L{start_line}:C{start_col}, char={current_char!r}")
 
-            # AAAAAAAAAA
-            self._trace(f"\n[POS] L{start_line}:C{start_col}, char={self._current()!r}")
+            # 1. 字符串字面量（最高优先级）
+            if current_char == '"':
+                quote_char = current_char
+                self._advance(1)
+                string_value = []
+                escaped = False
+                is_unclosed = False
 
-            for pattern_info in self.pattern_dfas:
-                dfa, name, skip, priority = pattern_info
-                if not skip:
-                    continue
-                match = self._match_dfa(dfa)
-                if match is not None:
-                    self._trace(f"[SKIP] {name} -> {match!r}")
-                    self._advance(len(match))
-                    break
-            else:
-                match = None
-            if match is not None:
-                continue
+                while self.pos < source_total:
+                    ch = self._current()
+                    if escaped:
+                        escape_map = {'n': '\n', 't': '\t', 'r': '\r', 'b': '\b', 'f': '\f'}
+                        string_value.append(escape_map.get(ch, ch))
+                        escaped = False
+                        self._advance(1)
+                    elif ch == quote_char:
+                        self._advance(1)
+                        self._trace(f"[STRING MATCH] {''.join(string_value)!r}")
+                        return Token("STRING_LIT", ''.join(string_value), start_line, start_col)
+                    elif ch == '\n':
+                        self._add_error(
+                            f"未闭合的字符串字面量（在第{start_line}行开始）",
+                            start_line, start_col, "E107",
+                            "请在字符串末尾添加对应的双引号 \""
+                        )
+                        is_unclosed = True
+                        break
+                    else:
+                        string_value.append(ch)
+                        self._advance(1)
 
-            # 匹配操作符（最长匹配优先）
+                # 文件末尾仍未闭合
+                if not is_unclosed and self.pos >= source_total:
+                    self._add_error(
+                        f"未闭合的字符串字面量（在第{start_line}行开始，文件末尾结束）",
+                        start_line, start_col, "E107",
+                        "请在字符串末尾添加对应的双引号 \""
+                    )
+                    is_unclosed = True
+
+                err_content = ''.join(string_value)
+                return Token("ERROR", err_content, start_line, start_col)
+
+            # 2. 数字匹配
+            if current_char.isdigit() or (current_char == '.' and self.pos + 1 < source_total and self.source[self.pos+1].isdigit()):
+                float_text, float_len = self._match_dfa(self.float_dfa[0], self.pos) if self.float_dfa else (None, 0)
+                if float_text:
+                    self._validate_number(float_text, start_line, start_col)
+                    self._advance(float_len)
+                    return Token("FLOAT_LIT", float_text, start_line, start_col)
+
+                int_text, int_len = self._match_dfa(self.int_dfa[0], self.pos) if self.int_dfa else (None, 0)
+                if int_text:
+                    self._validate_number(int_text, start_line, start_col)
+                    self._advance(int_len)
+                    return Token("INT_LIT", int_text, start_line, start_col)
+
+                # DFA匹配失败：当前字符为非法数字，单字符ERROR
+                self._advance(1)
+                return Token("ERROR", current_char, start_line, start_col)
+
+            # 3. 运算符匹配（最长优先）
             for op, kind in self.operators:
                 if self.source.startswith(op, self.pos):
                     self._trace(f"[OP MATCH] {op} -> {kind}")
                     self._advance(len(op))
                     return Token(kind, op, start_line, start_col)
 
-            # 匹配关键字（最长匹配优先）
+            # 4. 关键字匹配（最长优先）
             for kw, kind in self.keywords:
-                if not self.source.startswith(kw, self.pos):
-                    continue
+                if self.source.startswith(kw, self.pos):
+                    end_pos = self.pos + len(kw)
+                    if end_pos < source_total:
+                        next_ch = self.source[end_pos]
+                        if next_ch.isalnum() or next_ch == "_":
+                            continue
+                    self._trace(f"[KW MATCH] {kw} -> {kind}")
+                    self._advance(len(kw))
+                    return Token(kind, kw, start_line, start_col)
 
-                end_pos = self.pos + len(kw)
-                # 确保关键字后面不是字母、数字或下划线
-                if end_pos < len(self.source):
-                    ch = self.source[end_pos]
-                    if ch.isalnum() or ch == "_":
-                        continue
-
-                # AAAAAAAA
-                self._trace(f"[KW MATCH] {kw} -> {kind}")
-                self._advance(len(kw))
-                return Token(kind, kw, start_line, start_col)
-
-
-            # 使用DFA匹配所有patterns
+            # 5. DFA匹配
             best_match: Optional[str] = None
-            best_pattern: Optional[Tuple[DFA, str, bool, int]] = None
-            best_length = 0
-            best_priority = float('inf')
+            best_len = 0
+            best_skip = False
+            candidate_dfas = self.first_char_map.get(current_char, [])
+            if not candidate_dfas:
+                candidate_dfas = self.safe_patterns
 
-            for pattern_info in self.pattern_dfas:
+            for pattern_info in candidate_dfas:
                 dfa, name, skip, priority = pattern_info
-                if skip:
+                if name in ("FLOAT_LIT", "INT_LIT"):
                     continue
-                match = self._match_dfa(dfa)
-                
-                if match is not None:
-                    match_len = len(match)
-                    # 最长匹配优先，长度相同则优先级高的优先
-                    if (match_len > best_length) or (match_len == best_length and priority < best_priority):
-                        best_match = match
-                        best_pattern = pattern_info
-                        best_length = match_len
-                        best_priority = priority
+                match_txt, match_len = self._match_dfa(dfa, self.pos)
+                if not match_txt or match_len == 0:
+                    continue
+                if match_len > best_len:
+                    best_match = match_txt
+                    best_len = match_len
+                    best_skip = skip
 
-            if best_match is not None and best_pattern is not None:
-                dfa, name, skip, priority = best_pattern
-                raw = best_match
-                # AAAAAAAAAA
-                self._trace(f"[DFA MATCH] {name} -> {raw!r} (length={best_length}, priority={priority})")
+            if best_match and best_len > 0:
+                self._trace(f"[DFA MATCH] -> {best_match!r} (len={best_len})")
+                # 空白/跳过类Token
+                if best_skip:
+                    self._advance(best_len)
+                    continue
 
-                # 验证数字格式
-                if name in ("INT_LIT", "FLOAT_LIT"):
-                    self._validate_number(raw, start_line, start_col)
-
-                # 验证标识符不能以数字开头
-                if name == "IDENT" and raw[0].isdigit():
-                    # AAAAAAA
-                    self._trace("[ERROR] IDENT starts with digit")
+                if len(best_match) == 0:
                     self._add_error(
-                        f"标识符 '{raw}' 不能以数字开头",
-                        start_line,
-                        start_col,
-                        "E006"
+                        "空标识符不合法",
+                        start_line, start_col, "E108",
+                        "请输入合法的标识符，由字母、数字、下划线组成"
                     )
-                    self._advance(len(raw))
-                    return Token("ERROR", raw, start_line, start_col)
+                    self._advance(best_len)
+                    return Token("ERROR", "", start_line, start_col)
 
-                text = self._decode_string(raw) if name == "STRING_LIT" else raw
-                self._advance(len(raw))
-                return Token(name, text, start_line, start_col)
+                has_err = False
+                if re.search(r"[^a-zA-Z0-9_]", best_match):
+                    self._add_error(
+                        f"标识符 '{best_match}' 含非法字符",
+                        start_line, start_col, "E106",
+                        "仅允许字母、数字、下划线"
+                    )
+                    has_err = True
+                elif best_match[0].isdigit():
+                    self._add_error(
+                        f"标识符 '{best_match}' 不能以数字开头",
+                        start_line, start_col, "E105",
+                        "以字母或下划线开头"
+                    )
+                    has_err = True
 
-            # 无法识别的字符
-            ch = self._current()
-            if not ch:
-                break
+                if has_err:
+                    self._advance(best_len)
+                    return Token("ERROR", best_match, start_line, start_col)
 
-            # AAAAAAA
-            self._trace(f"[UNKNOWN] {ch!r}")
+                # 合法标识符
+                self._advance(best_len)
+                return Token("IDENT", best_match, start_line, start_col)
 
-            self._add_error(
-                f"无法识别的字符 {ch!r}",
-                start_line,
-                start_col,
-                "E001"
-            )
+            # 6. 无法识别的字符：统一单字符ERROR，最小粒度错误标记
+            self._trace(f"[UNKNOWN] {current_char!r}")
+            if self.pos + 1 < source_total:
+                next_ch = self.source[self.pos + 1]
+                if not (next_ch.isalnum() or next_ch in "_ \t\r\n"):
+                    self._add_error(
+                        f"连续非法字符 '{current_char}{next_ch}'",
+                        start_line, start_col, "E106",
+                        "检查是否输入错误的符号组合"
+                    )
+                    # 连续非法字符一次性消费两个，避免重复报错
+                    self._advance(2)
+                    return Token("ERROR", current_char + next_ch, start_line, start_col)
+            else:
+                self._add_error(
+                    f"无法识别的字符 '{current_char}'",
+                    start_line, start_col, "E101",
+                    "检查是否拼写错误或使用了不支持的符号"
+                )
+
+            # 单字符消费 + 单字符ERROR
             self._advance(1)
-            return Token("ERROR", ch, start_line, start_col)
+            return Token("ERROR", current_char, start_line, start_col)
 
-        # AAAAAA
         self._trace("[EOF]")
         return None
 
@@ -301,8 +408,7 @@ class Lexer:
                 break
             tokens.append(tok)
         tokens.append(Token("EOF", "", self.line, self.col))
-        # print(tokens)
-        return LexResult(tokens=tokens, errors=list(self.errors))
+        return LexResult(tokens=tokens, errors=list(self.errors), warnings=list(self.warnings))
 
     def __iter__(self) -> Iterator[Token]:
         return iter(self.tokenize().tokens)
@@ -314,11 +420,9 @@ class NFAState:
     def __init__(self):
         self.id = NFAState._counter
         NFAState._counter += 1
-
         # 普通边：可以是单个字符或字符集合
         self.transitions: Dict[Union[str, frozenset], Set[NFAState]] = {}
-
-        # ε边：set of states
+        # ε边
         self.epsilon: Set[NFAState] = set()
 
     def add_transition(self, symbol: Union[str, frozenset], state: NFAState) -> None:
@@ -373,7 +477,7 @@ class DFA:
 
 
 class RegexParser:
-    # 使用"."作为连接符，最稳定可靠
+    # 使用"."作为连接符
     CONCAT = "."
     PRIORITY = {
         "|": 1,
@@ -397,15 +501,17 @@ class RegexParser:
             "\\)": ")",
             "\\\\": "\\",
             "\\{": "{",
-            "\\}": "}"
+            "\\}": "}",
+            "\\'": "'",
+            '\\"': '"'
         }
 
+    # 将正则表达式拆分为token列表，正确处理转义字符和字符集标记
     def _tokenize(self) -> List[str]:
-        """将正则表达式拆分为token列表，正确处理转义字符和字符集标记"""
         tokens = []
         i = 0
         n = len(self.regex)
-        
+
         while i < n:
             # 处理字符集标记 {{name}}
             if self.regex[i] == "{" and i + 3 < n and self.regex[i:i+2] == "{{":
@@ -415,7 +521,7 @@ class RegexParser:
                     tokens.append(f"{{{{{charset_name}}}}}")
                     i = end + 2
                     continue
-            
+
             # 处理转义字符
             if self.regex[i] == "\\" and i + 1 < n:
                 tokens.append(self.regex[i:i+2])
@@ -424,25 +530,24 @@ class RegexParser:
                 # 普通字符或元字符
                 tokens.append(self.regex[i])
                 i += 1
-        
+
         return tokens
 
+    # 在token列表中插入显式的连接符
     def add_concat(self) -> List[str]:
-        """在token列表中插入显式的连接符"""
         tokens = self._tokenize()
         result = []
-        
+
         for i in range(len(tokens)):
             token = tokens[i]
             result.append(token)
-            
+
             if i == len(tokens) - 1:
                 continue
-                
+
             next_token = tokens[i+1]
-            
+
             # 判断是否需要插入连接符
-            # 左边可以是：普通字符、转义字符、字符集、右括号、闭包运算符
             left_can_concat = (
                 # 普通字符（非元字符）
                 (len(token) == 1 and token not in "()|*+?.")
@@ -455,8 +560,7 @@ class RegexParser:
                 # 闭包运算符
                 or token in "*+?"
             )
-            
-            # 右边可以是：普通字符、转义字符、字符集、左括号
+
             right_can_concat = (
                 # 普通字符（非元字符）
                 (len(next_token) == 1 and next_token not in ")|*+?.")
@@ -467,14 +571,14 @@ class RegexParser:
                 # 左括号
                 or next_token == "("
             )
-            
+
             if left_can_concat and right_can_concat:
                 result.append(self.CONCAT)
-        
+
         return result
 
+    # 将正则表达式转换为后缀表达式（支持字符集转移）
     def to_postfix(self) -> List[str]:
-        """将正则表达式转换为后缀表达式（支持字符集转移）"""
         tokens = self.add_concat()
         output = []
         stack = []
@@ -512,13 +616,12 @@ class RegexParser:
         self._trace(f"[后缀表达式] {output}")
         return output
 
-
     def _trace(self, msg: str) -> None:
         # 内部调试用
         pass
-    
+
+    # 根据后缀表达式构建NFA（支持字符集转移）
     def to_nfa(self) -> NFA:
-        """根据后缀表达式构建NFA - 支持字符集转移"""
         postfix = self.to_postfix()
         stack: List[NFA] = []
 
@@ -582,7 +685,7 @@ class RegexParser:
                 # 基本元素：单个字符、转义字符或字符集
                 s1 = NFAState()
                 s2 = NFAState()
-                
+
                 if token.startswith("{{") and token.endswith("}}"):
                     # 字符集
                     charset_name = token[2:-2]
@@ -593,6 +696,7 @@ class RegexParser:
                             chars = frozenset(self.charsets[charset_name])
                         s1.add_transition(chars, s2)
                     else:
+                        print()
                         raise ValueError(f"未定义的字符集: {charset_name}")
                 elif len(token) == 2 and token[0] == "\\":
                     # 转义字符
@@ -601,17 +705,17 @@ class RegexParser:
                 else:
                     # 普通字符
                     s1.add_transition(token, s2)
-                    
+
                 stack.append(NFA(s1, s2))
 
         if len(stack) != 1:
             raise ValueError(f"正则表达式解析失败，栈大小: {len(stack)}，后缀表达式: {postfix}")
-        
+
         return stack.pop()
-    
+
+    # 将NFA转换为DFA（子集构造法）
     @staticmethod
     def nfa_to_dfa(nfa: NFA) -> DFA:
-        """将NFA转换为DFA（子集构造法）- 支持字符集转移"""
         def epsilon_closure(states: Set[NFAState]) -> Set[NFAState]:
             """计算状态集的ε闭包"""
             stack = list(states)
@@ -628,7 +732,7 @@ class RegexParser:
         # 初始状态：开始状态的ε闭包
         start_closure = epsilon_closure({nfa.start})
         start_state = DFAState(start_closure)
-        
+
         dfa = DFA()
         dfa.start = start_state
         dfa.states = [start_state]
@@ -644,7 +748,7 @@ class RegexParser:
 
             # 收集所有可能的字符转移
             char_transitions: Dict[str, Set[NFAState]] = {}
-            
+
             for nfa_state in current_dfa_state.nfa_states:
                 for sym, targets in nfa_state.transitions.items():
                     if isinstance(sym, frozenset):
@@ -653,14 +757,7 @@ class RegexParser:
                             if char not in char_transitions:
                                 char_transitions[char] = set()
                             char_transitions[char].update(targets)
-                    elif sym == ("CJK",):
-                        for code in range(0x4E00, 0x9FFF + 1):
-                            char = chr(code)
-
-                            if char not in char_transitions:
-                                char_transitions[char] = set()
-
-                            char_transitions[char].update(targets)
+                    
                     else:
                         # 单个字符转移
                         if sym not in char_transitions:
@@ -686,49 +783,3 @@ class RegexParser:
                 current_dfa_state.transitions[char] = new_dfa_state
 
         return dfa
-
-"""
-if __name__ == "__main__":
-    print("========== MiniLang Lexer (NFA/DFA Based) ==========")
-    print("输入源码（输入 EOF 单独一行结束）\n")
-
-    lines = []
-    while True:
-        try:
-            line = input()
-            if line.strip() == "EOF":
-                break
-            lines.append(line)
-        except EOFError:
-            break
-
-    source = "\n".join(lines)
-
-    print("\n========== 源码 ==========")
-    print(source)
-
-    print("\n========== 开始词法分析 ==========\n")
-
-    try:
-        lexer = Lexer(source, trace=True)
-        result = lexer.tokenize()
-
-        print("\n========== 最终 Token 流 ==========")
-        for tok in result.tokens:
-            print(tok)
-
-        print("\n========== Token 总数 ==========")
-        print(len(result.tokens))
-
-        if result.errors:
-            print("\n========== 错误 ==========")
-            for e in result.errors:
-                print(e)
-        else:
-            print("\n无词法错误")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"\n词法分析失败: {e}")
-
-"""
