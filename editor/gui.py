@@ -331,6 +331,18 @@ class MiniLangIDE(tk.Tk):
         self.bind("<F6>", lambda e: self._compile_only())
         self.bind("<F7>", lambda e: self._run())
 
+        # 全选
+        self.editor.bind("<Control-a>", self._select_all)
+        self.editor.bind("<Control-A>", self._select_all)
+
+        # 缩进/取消缩进
+        self.editor.bind("<Tab>", self._indent_selection)
+        self.editor.bind("<ISO_Left_Tab>", self._outdent_selection)
+        self.editor.bind("<Shift-Tab>", self._outdent_selection)
+        self.editor.bind("<Shift-ISO_Left_Tab>", self._outdent_selection)
+        self.editor.bind("<<PrevWindow>>", self._outdent_selection)
+        self.editor.bind_class("Text", "<Shift-Tab>", self._outdent_selection)
+
         # 文本变更监听
         self.editor.bind("<KeyRelease>", self._on_text_change)
         self.editor.bind("<ButtonRelease>", self._on_text_change)
@@ -340,6 +352,48 @@ class MiniLangIDE(tk.Tk):
             return
         if self.editor.get("1.0", tk.END) != self._saved_content:
             self.is_modified = True
+
+    def _select_all(self, event=None) -> str:
+        self.editor.tag_add("sel", "1.0", tk.END)
+        return "break"
+
+    def _get_sel_lines(self) -> tuple[int, int] | None:
+        try:
+            sel_start = self.editor.index("sel.first")
+            sel_end = self.editor.index("sel.last")
+        except tk.TclError:
+            return None
+        start_line = int(sel_start.split(".")[0])
+        end_line = int(sel_end.split(".")[0])
+        last_line = int(self.editor.index("end-2c").split(".")[0])
+        return start_line, min(end_line, last_line)
+
+    def _indent_selection(self, event=None) -> str:
+        sel = self._get_sel_lines()
+        if sel is None:
+            self.editor.insert("insert", "    ")
+            return "break"
+        start_line, end_line = sel
+        for line in range(start_line, end_line + 1):
+            self.editor.insert(f"{line}.0", "    ")
+        self.editor.tag_remove("sel", "1.0", tk.END)
+        self.editor.tag_add("sel", f"{start_line}.0", f"{end_line}.0 lineend")
+        return "break"
+
+    def _outdent_selection(self, event=None) -> str:
+        sel = self._get_sel_lines()
+        if sel is None:
+            return "break"
+        start_line, end_line = sel
+        for line in range(start_line, end_line + 1):
+            cur = self.editor.get(f"{line}.0", f"{line}.4")
+            stripped = cur.lstrip(" ")
+            removed = len(cur) - len(stripped)
+            if removed:
+                self.editor.delete(f"{line}.0", f"{line}.{removed}")
+        self.editor.tag_remove("sel", "1.0", tk.END)
+        self.editor.tag_add("sel", f"{start_line}.0", f"{end_line}.0 lineend")
+        return "break"
 
     def _load_default(self) -> None:
         if self.current_file and self.current_file.exists():
