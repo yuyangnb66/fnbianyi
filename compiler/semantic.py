@@ -122,10 +122,14 @@ class SemanticAnalyzer:
         self.undeclared_reported: Set[str] = set()
 
     def analyze(self, program: Program) -> SemanticResult:
+        for stmt in program.statements:
+            if isinstance(stmt, DeclStmt):
+                self._analyze_stmt(stmt)
         for fn in program.functions:
             self._analyze_function(fn)
         for stmt in program.statements:
-            self._analyze_stmt(stmt)
+            if not isinstance(stmt, DeclStmt):
+                self._analyze_stmt(stmt)
         # 全局作用域未使用变量检测
         self._check_unused_globals()
         return SemanticResult(
