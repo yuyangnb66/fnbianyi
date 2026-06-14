@@ -1,6 +1,4 @@
-int x;
-int y;
+int x, y;
 input(x,y);
 print(x,y);
 
- 

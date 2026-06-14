@@ -89,10 +89,14 @@ class CodeGenerator:
         return "\n".join(lines) + "\n"
 
     def _gen_global_decl(self, stmt: DeclStmt) -> List[str]:
-        if stmt.array_size:
-            elem = self._array_elem_default(stmt.type_name)
-            return [f"_vars[{stmt.name!r}] = [{elem}] * {stmt.array_size}"]
-        return [f"_vars[{stmt.name!r}] = {self._default(stmt.type_name)}"]
+        lines: List[str] = []
+        for name, arr_size in zip(stmt.names, stmt.array_sizes):
+            if arr_size:
+                elem = self._array_elem_default(stmt.type_name)
+                lines.append(f"_vars[{name!r}] = [{elem}] * {arr_size}")
+            else:
+                lines.append(f"_vars[{name!r}] = {self._default(stmt.type_name)}")
+        return lines
 
     def _gen_function_ast(self, fn: FuncDecl, is_main: bool = False) -> List[str]:
         params = {p[1] for p in fn.params}
@@ -133,7 +137,7 @@ class CodeGenerator:
         names: Set[str] = set()
         for stmt in block.statements:
             if isinstance(stmt, DeclStmt):
-                names.add(stmt.name)
+                names.update(stmt.names)
             elif isinstance(stmt, Block):
                 names |= CodeGenerator._collect_locals(stmt)
             elif isinstance(stmt, IfStmt):
@@ -168,10 +172,14 @@ class CodeGenerator:
     ) -> List[str]:
         pad = " " * (4 * indent)
         if isinstance(stmt, DeclStmt):
-            if stmt.array_size:
-                elem = self._array_elem_default(stmt.type_name)
-                return [f"{pad}{stmt.name} = [{elem}] * {stmt.array_size}"]
-            return [f"{pad}{stmt.name} = {self._default(stmt.type_name)}"]
+            lines: List[str] = []
+            for name, arr_size in zip(stmt.names, stmt.array_sizes):
+                if arr_size:
+                    elem = self._array_elem_default(stmt.type_name)
+                    lines.append(f"{pad}{name} = [{elem}] * {arr_size}")
+                else:
+                    lines.append(f"{pad}{name} = {self._default(stmt.type_name)}")
+            return lines
         if isinstance(stmt, AssignStmt):
             val = self._gen_expr_ast(stmt.value, params, locals_set)
             if stmt.index:

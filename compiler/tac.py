@@ -125,11 +125,12 @@ class TACGenerator:
         self._out = out
         try:
             if isinstance(stmt, DeclStmt):
-                if stmt.array_size is not None:
-                    out.append(TACInstr("decl_array", str(stmt.array_size), stmt.type_name, stmt.name))
-                else:
-                    default = stmt.type_name
-                    out.append(TACInstr("decl", default, "", stmt.name))
+                for name, arr_size in zip(stmt.names, stmt.array_sizes):
+                    if arr_size is not None:
+                        out.append(TACInstr("decl_array", str(arr_size), stmt.type_name, name))
+                    else:
+                        default = stmt.type_name
+                        out.append(TACInstr("decl", default, "", name))
             elif isinstance(stmt, AssignStmt):
                 val = self._gen_expr(stmt.value, out)
                 if stmt.index:

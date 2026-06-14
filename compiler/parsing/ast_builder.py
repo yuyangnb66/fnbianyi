@@ -156,17 +156,42 @@ def _build_stmt(node: Optional[PTNode]) -> Optional[Stmt]:
 
 
 def _build_decl(node: PTNode) -> Optional[DeclStmt]:
-    if len(node.children) < 4:
+    if len(node.children) < 3:
         return None
     tname = _type_name(node.child(0))
-    name = node.child(1).text()
-    array_size = None
-    arr = node.child(2)
-    if arr and arr.children:
-        lit = arr.child(1)
-        if lit:
-            array_size = int(lit.text())
-    return DeclStmt(tname, name, array_size, node.child(1).line())
+    names: List[str] = []
+    sizes: List[Optional[int]] = []
+    var_list = node.child(1)
+    _collect_vars(var_list, names, sizes)
+    if not names:
+        return None
+    return DeclStmt(tname, names, sizes, node.child(0).line())
+
+
+def _collect_vars(node: Optional[PTNode], names: List[str], sizes: List[Optional[int]]) -> None:
+    if not node or not node.children:
+        return
+    if node.symbol == "VarList":
+        names.append(node.child(0).text())
+        arr = node.child(1)
+        array_size = None
+        if arr and arr.children:
+            lit = arr.child(1)
+            if lit:
+                array_size = int(lit.text())
+        sizes.append(array_size)
+        _collect_vars(node.child(2) if len(node.children) > 2 else None, names, sizes)
+    elif node.symbol == "VarListTail":
+        if len(node.children) >= 4:
+            names.append(node.child(1).text())
+            arr = node.child(2)
+            array_size = None
+            if arr and arr.children:
+                lit = arr.child(1)
+                if lit:
+                    array_size = int(lit.text())
+            sizes.append(array_size)
+            _collect_vars(node.child(3), names, sizes)
 
 
 def _build_assign(node: PTNode) -> Optional[AssignStmt]:

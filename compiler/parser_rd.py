@@ -223,19 +223,26 @@ class RecursiveDescentParser:
 
     def _parse_decl(self) -> Optional[DeclStmt]:
         type_tok = self._advance()
-        name_tok = self._expect("IDENT")
-        if not name_tok:
-            return None
-        array_size = None
-        if self._match("LBRACKET"):
-            size_tok = self._expect("INT_LIT", "数组大小应为正整数")
-            if size_tok:
-                array_size = int(size_tok.value)
-            if not self._expect("RBRACKET"):
+        names: List[str] = []
+        array_sizes: List[Optional[int]] = []
+        while True:
+            name_tok = self._expect("IDENT")
+            if not name_tok:
                 return None
+            names.append(name_tok.value)
+            array_size = None
+            if self._match("LBRACKET"):
+                size_tok = self._expect("INT_LIT", "数组大小应为正整数")
+                if size_tok:
+                    array_size = int(size_tok.value)
+                if not self._expect("RBRACKET"):
+                    return None
+            array_sizes.append(array_size)
+            if not self._match("COMMA"):
+                break
         if not self._expect("SEMI"):
             self._finish_stmt()
-        return DeclStmt(type_tok.value.lower(), name_tok.value, array_size, type_tok.line)
+        return DeclStmt(type_tok.value.lower(), names, array_sizes, type_tok.line)
 
     def _parse_assign(self) -> Optional[AssignStmt]:
         name_tok = self._advance()

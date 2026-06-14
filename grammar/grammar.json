@@ -34,7 +34,9 @@
       ["ContinueStmt"],
       ["Block"]
     ],
-    "DeclStmt": [["TypeTok", "IDENT", "ArrayOpt", "SEMI"]],
+    "DeclStmt": [["TypeTok", "VarList", "SEMI"]],
+    "VarList": [["IDENT", "ArrayOpt", "VarListTail"]],
+    "VarListTail": [["COMMA", "IDENT", "ArrayOpt", "VarListTail"], []],
     "ArrayOpt": [["LBRACKET", "INT_LIT", "RBRACKET"], []],
     "AssignStmt": [["IDENT", "IndexOpt", "ASSIGN", "Logic", "SEMI"]],
     "IndexOpt": [["LBRACKET", "Logic", "RBRACKET"], []],

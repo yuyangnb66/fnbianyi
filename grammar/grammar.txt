@@ -30,7 +30,9 @@ Stmt       → DeclStmt | AssignStmt | IfStmt | WhileStmt
             | InputStmt | WriteStmt | ReturnStmt
             | BreakStmt | ContinueStmt | Block
 
-DeclStmt   → Type IDENT ArrayOpt? ';'
+DeclStmt   → Type VarList ';'
+VarList    → ID ArrayOpt VarListTail
+VarListTail → ',' ID ArrayOpt VarListTail | ε
 ArrayOpt   → '[' INT_LIT ']'
 
 AssignStmt → IDENT IndexOpt? '=' Logic ';'

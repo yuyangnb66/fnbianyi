@@ -276,31 +276,32 @@ class SemanticAnalyzer:
             return
 
         if isinstance(stmt, DeclStmt):
-            sym = Symbol(
-                stmt.name, stmt.type_name, stmt.line,
-                declared_col=stmt.col,
-                is_array=stmt.array_size is not None,
-                array_size=stmt.array_size or 0,
-            )
-            if stmt.array_size is not None and stmt.array_size <= 0:
-                self._err(
-                    f"数组 '{stmt.name}' 大小不是正整数",
-                    stmt.line,
-                    stmt.col,
-                    "E311",
-                    "将数组大小设置为大于0的整数"
+            for var_name, arr_size in zip(stmt.names, stmt.array_sizes):
+                sym = Symbol(
+                    var_name, stmt.type_name, stmt.line,
+                    declared_col=stmt.col,
+                    is_array=arr_size is not None,
+                    array_size=arr_size or 0,
                 )
-            if stmt.type_name == "string" and stmt.array_size:
-                self._err(
-                    "string 类型不支持数组形式声明",
-                    stmt.line,
-                    stmt.col,
-                    "E312",
-                    "取消string类型的数组定义，或更换数据类型"
-                )
-            dup = self.current_scope.define(sym)
-            if dup:
-                self.errors.append(dup)
+                if arr_size is not None and arr_size <= 0:
+                    self._err(
+                        f"数组 '{var_name}' 大小不是正整数",
+                        stmt.line,
+                        stmt.col,
+                        "E311",
+                        "将数组大小设置为大于0的整数"
+                    )
+                if stmt.type_name == "string" and arr_size:
+                    self._err(
+                        "string 类型不支持数组形式声明",
+                        stmt.line,
+                        stmt.col,
+                        "E312",
+                        "取消string类型的数组定义，或更换数据类型"
+                    )
+                dup = self.current_scope.define(sym)
+                if dup:
+                    self.errors.append(dup)
 
         elif isinstance(stmt, AssignStmt):
             sym = self.current_scope.lookup(stmt.name)

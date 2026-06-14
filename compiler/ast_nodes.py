@@ -29,10 +29,18 @@ class FuncDecl(Stmt):
 @dataclass
 class DeclStmt(Stmt):
     type_name: str
-    name: str
-    array_size: Optional[int] = None
+    names: List[str]
+    array_sizes: List[Optional[int]]
     line: int = 0
     col: int = 0
+
+    @property
+    def name(self) -> str:
+        return self.names[0] if self.names else ""
+
+    @property
+    def array_size(self) -> Optional[int]:
+        return self.array_sizes[0] if self.array_sizes else None
 
 
 @dataclass
