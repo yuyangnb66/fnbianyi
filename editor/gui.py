@@ -246,6 +246,7 @@ class MiniLangIDE(tk.Tk):
         self.current_run_window: RunWindow | None = None
         self.last_compiled_code: str | None = None
         self.last_compiled_source: str | None = None
+        self._saved_content = ""
 
         ensure_dirs()
         self._build_ui()
@@ -335,7 +336,10 @@ class MiniLangIDE(tk.Tk):
         self.editor.bind("<ButtonRelease>", self._on_text_change)
 
     def _on_text_change(self, _event=None) -> None:
-        self.is_modified = True
+        if self.is_modified:
+            return
+        if self.editor.get("1.0", tk.END) != self._saved_content:
+            self.is_modified = True
 
     def _load_default(self) -> None:
         if self.current_file and self.current_file.exists():
@@ -347,6 +351,7 @@ class MiniLangIDE(tk.Tk):
         self.editor_widget._update_lineno()
         self._update_file_label()
         self.is_modified = False
+        self._saved_content = self.editor.get("1.0", tk.END)
         self._set_status("就绪", "success")
 
     def _update_file_label(self) -> None:
@@ -367,6 +372,7 @@ class MiniLangIDE(tk.Tk):
         self._set_status("新建文件", "success")
         self._update_file_label()
         self.is_modified = False
+        self._saved_content = self.editor.get("1.0", tk.END)
 
     def _open_file(self) -> None:
         if self.is_modified:
@@ -386,6 +392,7 @@ class MiniLangIDE(tk.Tk):
         self._set_status(f"已打开 {self.current_file.name}", "success")
         self._update_file_label()
         self.is_modified = False
+        self._saved_content = self.editor.get("1.0", tk.END)
 
     def _save_file(self) -> None:
         ensure_dirs()
@@ -397,6 +404,7 @@ class MiniLangIDE(tk.Tk):
         self._set_status(f"已保存 → {self.current_file}", "success")
         self._update_file_label()
         self.is_modified = False
+        self._saved_content = self.editor.get("1.0", tk.END)
 
     def _save_as_file(self) -> None:
         path = filedialog.asksaveasfilename(initialdir=WORKSPACE, defaultextension=".ml", filetypes=[("MiniLang", "*.ml"), ("所有文件", "*.*")])
