@@ -26,6 +26,3 @@ if (s == "hello") {
 } else {
     print("other");
 }
-
-
-

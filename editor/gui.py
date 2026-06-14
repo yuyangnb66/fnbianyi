@@ -353,8 +353,12 @@ class MiniLangIDE(tk.Tk):
         self.file_label.config(text=str(self.current_file) if self.current_file else "未保存")
 
     def _new_file(self) -> None:
-        if self.is_modified and not messagebox.askyesno("提示", "当前文件已修改，是否保存？"):
-            return
+        if self.is_modified:
+            choice = messagebox.askyesnocancel("提示", "当前文件已修改，是否保存？")
+            if choice is None:
+                return
+            if choice:
+                self._save_file()
         self.current_file = WORKSPACE / "main.ml"
         self.editor.delete("1.0", tk.END)
         self.editor.insert("1.0", DEFAULT_SOURCE)
@@ -365,8 +369,12 @@ class MiniLangIDE(tk.Tk):
         self.is_modified = False
 
     def _open_file(self) -> None:
-        if self.is_modified and not messagebox.askyesno("提示", "当前文件已修改，是否保存？"):
-            return
+        if self.is_modified:
+            choice = messagebox.askyesnocancel("提示", "当前文件已修改，是否保存？")
+            if choice is None:
+                return
+            if choice:
+                self._save_file()
         path = filedialog.askopenfilename(initialdir=WORKSPACE, filetypes=[("MiniLang", "*.ml"), ("所有文件", "*.*")])
         if not path:
             return
