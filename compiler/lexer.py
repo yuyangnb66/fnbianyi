@@ -218,6 +218,25 @@ class Lexer:
         match_str = self.source[start_pos:last_accept_pos]
         return match_str, last_accept_pos - start_pos
 
+    def _try_skip_patterns(self) -> bool:
+        """跳过 COMMENT / WHITESPACE；须在运算符匹配之前调用，避免 // 被拆成 SLASH。"""
+        best_match: Optional[str] = None
+        best_len = 0
+        best_name = ""
+        for dfa, name, skip, _priority in self.pattern_dfas:
+            if not skip:
+                continue
+            match_txt, match_len = self._match_dfa(dfa, self.pos)
+            if match_txt and match_len > best_len:
+                best_match = match_txt
+                best_len = match_len
+                best_name = name
+        if not best_match or best_len <= 0:
+            return False
+        self._trace(f"[SKIP] {best_name} -> {best_match!r}")
+        self._advance(best_len)
+        return True
+
     def next_token(self) -> Optional[Token]:
         source_total = len(self.source)
         if self.pos > source_total * 2:
@@ -293,6 +312,10 @@ class Lexer:
                 # DFA匹配失败：当前字符为非法数字，单字符ERROR
                 self._advance(1)
                 return Token("ERROR", current_char, start_line, start_col)
+
+            # 2.5 注释与空白（必须在运算符之前，否则 // 会被识别为 SLASH）
+            if self._try_skip_patterns():
+                continue
 
             # 3. 运算符匹配（最长优先）
             for op, kind in self.operators:
@@ -752,14 +775,17 @@ class RegexParser:
             for nfa_state in current_dfa_state.nfa_states:
                 for sym, targets in nfa_state.transitions.items():
                     if isinstance(sym, frozenset):
-                        # 字符集转移：为每个字符单独添加转移
                         for char in sym:
                             if char not in char_transitions:
                                 char_transitions[char] = set()
                             char_transitions[char].update(targets)
-                    
+                    elif sym == ("CJK",):
+                        for code in range(0x4E00, 0x9FFF + 1):
+                            char = chr(code)
+                            if char not in char_transitions:
+                                char_transitions[char] = set()
+                            char_transitions[char].update(targets)
                     else:
-                        # 单个字符转移
                         if sym not in char_transitions:
                             char_transitions[sym] = set()
                         char_transitions[sym].update(targets)
